@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Showtime camera test</title>
+<meta name="description" content="Phase 0 camera test for the Showtime Driver Mini App. Nothing is uploaded or saved.">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg:#FFF7EC; --surface:#FFFFFF; --ink:#211914; --muted:#7A6A5E; --line:#EADFD2;
+    --accent:#FF5A00; --accent2:#FF8A00; --accentText:#C94100; --chip:#FFE8D6;
+    --cam:#000; --ok:#2E7D32; --warn:#B26A00; --bad:#B3261E;
+  }
+  *{box-sizing:border-box} html,body{margin:0;height:100%}
+  body{font-family:Inter,-apple-system,system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+  .screen{display:none;min-height:100%;flex-direction:column}
+  .screen.on{display:flex}
+  .pad{padding:20px 20px calc(20px + env(safe-area-inset-bottom))}
+  h1{font-size:28px;line-height:1.1;letter-spacing:-.6px;margin:8px 0 6px;font-weight:800}
+  h2{font-size:17px;margin:18px 0 8px;font-weight:700}
+  p{line-height:1.45;margin:6px 0}
+  .muted{color:var(--muted)} .small{font-size:13px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:16px;margin-top:12px;box-shadow:0 14px 28px rgba(82,48,26,.08)}
+  .btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:999px;border:0;padding:0 22px;
+       font:900 15px/1 Inter,system-ui,sans-serif;letter-spacing:1.6px;text-transform:uppercase;color:#fff;
+       background:linear-gradient(135deg,var(--accent),var(--accent2));width:100%;cursor:pointer}
+  .btn.quiet{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+  .btn:disabled{opacity:.45}
+  .btn + .btn{margin-top:10px}
+  .strip{background:repeating-linear-gradient(45deg,#211914 0 6px,#3D322B 6px 12px);color:#FFD3B8;font-size:12px;font-weight:600;text-align:center;padding:5px}
+  .strip span{background:#211914;padding:2px 8px;border-radius:6px}
+  /* camera */
+  #cam{background:var(--cam);color:#fff;position:relative}
+  #cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+  #guide{position:absolute;left:7%;width:86%;top:25%;height:24%;pointer-events:none}
+  #guide i{position:absolute;width:38px;height:38px;border:0 solid #fff}
+  #guide i:nth-child(1){top:0;left:0;border-top-width:3px;border-left-width:3px;border-top-left-radius:8px}
+  #guide i:nth-child(2){top:0;right:0;border-top-width:3px;border-right-width:3px;border-top-right-radius:8px}
+  #guide i:nth-child(3){bottom:0;left:0;border-bottom-width:3px;border-left-width:3px;border-bottom-left-radius:8px}
+  #guide i:nth-child(4){bottom:0;right:0;border-bottom-width:3px;border-right-width:3px;border-bottom-right-radius:8px}
+  .camtop{position:absolute;top:0;left:0;right:0;padding:calc(10px + env(safe-area-inset-top)) 14px 0;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .round{width:48px;height:48px;border-radius:24px;background:rgba(0,0,0,.5);border:0;color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center}
+  .chip{min-height:44px;padding:0 16px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font-weight:600;font-size:15px;display:flex;align-items:center;max-width:62%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cambottom{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;gap:18px;padding:24px 20px calc(32px + env(safe-area-inset-bottom));background:rgba(0,0,0,.35)}
+  .hint{font-weight:600;font-size:16px;text-shadow:0 0 6px rgba(0,0,0,.6);text-align:center}
+  #shutter{width:84px;height:84px;border-radius:42px;border:5px solid #fff;background:transparent;display:flex;align-items:center;justify-content:center;padding:0}
+  #shutter b{display:block;width:64px;height:64px;border-radius:32px;background:var(--accent)}
+  #shutter:disabled{opacity:.6}
+  .spin{width:36px;height:36px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  /* review */
+  #review{background:#16110E;color:#F4F5F7}
+  #review .card{background:#221A15;border-color:#3A2E27;box-shadow:none;color:#F4F5F7}
+  #review .muted{color:#B8A99C}
+  .photo{border-radius:22px;overflow:hidden;background:#000;aspect-ratio:3/4;max-height:52vh;margin:0 auto}
+  .photo img{width:100%;height:100%;object-fit:contain;display:block}
+  .stars{font-size:30px;letter-spacing:4px;color:var(--accent)}
+  .verdict{font-size:26px;font-weight:800;margin-top:6px}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:6px 14px;font-size:14px}
+  .kv b{font-weight:600}
+  .tag{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;background:var(--chip);color:var(--accentText)}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#FFF1E2;border:1px solid var(--line);border-radius:12px;padding:10px;max-height:260px;overflow:auto;color:#3b2e25}
+  #review pre{background:#1B1511;border-color:#3A2E27;color:#E6DCD2}
+  input[type=file]{display:none}
+</style>
+</head>
+<body>
+
+<!-- Start -->
+<section id="start" class="screen on">
+  <div class="strip"><span>Camera test, nothing is saved or uploaded</span></div>
+  <div class="pad" style="flex:1">
+    <h1>Showtime camera test</h1>
+    <p class="muted">Stand in front of a DigiVan screen. Tap <b>Open camera</b>, fit the screen inside the frame, press the shutter. Then copy the report and send it to Barbara.</p>
+    <div class="card">
+      <h2 style="margin-top:0">This phone</h2>
+      <div class="kv" id="devinfo"></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">What the test checks</h2>
+      <p class="small muted">1. Does the live camera work here? 2. How big are the photos? 3. Can the page set exposure or shutter speed? 4. Sharpness, light and LED lines on three quick shots. 5. The phone's own camera as a fallback, and whether its photos carry a location.</p>
+    </div>
+  </div>
+  <div class="pad" style="padding-top:0">
+    <button class="btn" id="openCam">Open camera</button>
+    <button class="btn quiet" id="openNative">Use phone camera instead</button>
+    <input type="file" id="file" accept="image/*" capture="environment">
+  </div>
+</section>
+
+<!-- Camera -->
+<section id="cam" class="screen">
+  <video id="video" autoplay playsinline muted></video>
+  <div id="guide"><i></i><i></i><i></i><i></i></div>
+  <div class="camtop">
+    <button class="round" id="closeCam" aria-label="Close camera">✕</button>
+    <div class="chip" id="camchip">Starting camera…</div>
+    <div style="width:48px"></div>
+  </div>
+  <div class="cambottom">
+    <div class="hint" id="hint">Fit the whole screen inside the frame</div>
+    <button id="shutter" aria-label="Take photo" disabled><b></b></button>
+  </div>
+</section>
+
+<!-- Review -->
+<section id="review" class="screen">
+  <div class="strip"><span>Camera test, nothing is saved or uploaded</span></div>
+  <div class="pad" style="flex:1">
+    <div class="photo"><img id="shot" alt="The photo you just took"></div>
+    <div style="text-align:center;margin-top:14px">
+      <div class="stars" id="stars"></div>
+      <div class="verdict" id="verdict"></div>
+      <div class="muted small" id="sub"></div>
+    </div>
+    <div class="card" id="tips"></div>
+    <div class="card">
+      <h2 style="margin-top:0">Measurements</h2>
+      <div class="kv" id="measures"></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Report</h2>
+      <p class="small muted">Copy this and send it to Barbara with a note of the phone, the time of day and what the screen looked like to your eye.</p>
+      <pre id="report"></pre>
+    </div>
+  </div>
+  <div class="pad" style="padding-top:0">
+    <button class="btn" id="copy">Copy report</button>
+    <button class="btn quiet" id="again">Take another</button>
+    <button class="btn quiet" id="home">Back to start</button>
+  </div>
+</section>
+
+<script>
+(() => {
+'use strict';
+// ---------- Telegram ----------
+const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== undefined ? window.Telegram.WebApp : null;
+const inTelegram = !!(tg && (tg.initData || tg.platform !== 'unknown'));
+if (tg) { try { tg.ready(); tg.expand(); if (tg.isVersionAtLeast && tg.isVersionAtLeast('8.0') && tg.requestFullscreen) { /* only in camera */ } } catch (e) {} }
+
+// ---------- Screen mode constants (mirrors src/lib/cameraSettings.ts) ----------
+const GUIDE = { x: 0.07, y: 0.25, w: 0.86, h: 0.24 };
+const BURST = 3;
+const MIN_SHUTTER_S = 1 / 50;
+const EV_BIAS = -0.7;
+const ANALYSIS_W = 320;
+
+// ---------- Quality maths (ported from src/lib/quality.ts, screenExposure.ts, pixels.ts) ----------
+const T = { blurVar: 20, sharpVar: 300, dark: 16, bright: 245, meanLow: 70, meanHigh: 180, darkShareOk: 0.35, brightShareOk: 0.25 };
+const clamp = (n, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, n));
+function toGray(rgba, w, h) {
+  const out = new Uint8Array(w * h);
+  for (let i = 0, p = 0; i < out.length; i++, p += 4) out[i] = (rgba[p] * 299 + rgba[p + 1] * 587 + rgba[p + 2] * 114 + 500) / 1000;
+  return { data: out, width: w, height: h };
+}
+function laplacianVariance({ data, width: w, height: h }) {
+  if (w < 3 || h < 3) return 0;
+  let sum = 0, sq = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x, v = data[i - w] + data[i + w] + data[i - 1] + data[i + 1] - 4 * data[i];
+    sum += v; sq += v * v; n++;
+  }
+  const m = sum / n; return sq / n - m * m;
+}
+function exposureStats({ data }) {
+  let t = 0, d = 0, b = 0;
+  for (let i = 0; i < data.length; i++) { const v = data[i]; t += v; if (v < T.dark) d++; if (v >= T.bright) b++; }
+  const n = data.length || 1; return { meanLuma: t / n, darkShare: d / n, brightShare: b / n };
+}
+const sharpnessScore = (lv) => { const lo = Math.log10(T.blurVar), hi = Math.log10(T.sharpVar); return clamp((Math.log10(Math.max(lv, 1e-6)) - lo) / (hi - lo)); };
+function exposureScore(mean, dark, bright) {
+  let m = 1; if (mean < T.meanLow) m = clamp((mean - 20) / (T.meanLow - 20)); else if (mean > T.meanHigh) m = clamp((235 - mean) / (235 - T.meanHigh));
+  return m * (1 - clamp((dark - T.darkShareOk) / 0.4)) * (1 - clamp((bright - T.brightShareOk) / 0.4));
+}
+const toHalfStars = (s) => clamp(Math.round((1 + 4 * clamp(s)) * 2) / 2, 1, 5);
+const verdictFor = (st) => st >= 4.5 ? 'Excellent' : st >= 3.5 ? 'Good' : st >= 2.5 ? 'Could be better' : 'Retake recommended';
+function assess(g) {
+  const lv = laplacianVariance(g), { meanLuma, darkShare, brightShare } = exposureStats(g);
+  const sharpness = sharpnessScore(lv), exposure = exposureScore(meanLuma, darkShare, brightShare);
+  let stars = toHalfStars(0.5 * sharpness + 0.5 * exposure); if (sharpness < 0.25) stars = Math.min(stars, 2);
+  const tips = [];
+  if (sharpness < 0.25) tips.push('The photo is blurred. Hold your phone steady and retake.'); else if (sharpness < 0.5) tips.push('Hold your phone steady.');
+  if (meanLuma < T.meanLow || darkShare > T.darkShareOk) tips.push('Too dark. Move closer to the screen or turn towards the light.');
+  if (meanLuma > T.meanHigh || brightShare > T.brightShareOk) tips.push('Too bright. Avoid glare and direct sun behind the screen.');
+  return { stars, verdict: verdictFor(stars), sharpness, exposure, tips: tips.slice(0, 3), measures: { laplacianVariance: lv, meanLuma, darkShare, brightShare } };
+}
+function guideToPhotoRegion(g, vw, vh, pw, ph) {
+  if (!(vw > 0 && vh > 0 && pw > 0 && ph > 0)) return g;
+  const s = Math.max(vw / pw, vh / ph), sw = vw / (pw * s), sh = vh / (ph * s), ox = (1 - sw) / 2, oy = (1 - sh) / 2;
+  const x = clamp(ox + g.x * sw), y = clamp(oy + g.y * sh);
+  return { x, y, w: clamp(g.w * sw, 0, 1 - x), h: clamp(g.h * sh, 0, 1 - y) };
+}
+function bandingScore({ data, width, height }, r = { x: 0, y: 0, w: 1, h: 1 }) {
+  const x0 = Math.floor(r.x * width), x1 = Math.max(x0 + 1, Math.floor((r.x + r.w) * width));
+  const y0 = Math.floor(r.y * height), y1 = Math.max(y0 + 1, Math.floor((r.y + r.h) * height));
+  const rows = [];
+  for (let y = y0; y < y1; y++) { let s = 0; for (let x = x0; x < x1; x++) s += data[y * width + x]; rows.push(s / (x1 - x0)); }
+  if (rows.length < 5) return 0;
+  const half = Math.max(2, Math.round(rows.length / 16)); let sq = 0, tot = 0;
+  for (let i = 0; i < rows.length; i++) { let s = 0, n = 0; for (let j = Math.max(0, i - half); j <= Math.min(rows.length - 1, i + half); j++) { s += rows[j]; n++; } const d = rows[i] - s / n; sq += d * d; tot += rows[i]; }
+  return Math.sqrt(sq / rows.length) / Math.max(tot / rows.length, 1);
+}
+function pickBest(frames) {
+  const top = Math.max(...frames.map(f => f.q.sharpness));
+  return frames.filter(f => f.q.sharpness >= top * 0.9).reduce((b, f) => f.banding < b.banding ? f : b);
+}
+
+// ---------- Device info ----------
+const ua = navigator.userAgent;
+const os = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'Other';
+const info = {
+  test: 'showtime-camera-test v1',
+  when: new Date().toISOString(),
+  os,
+  browser: /CriOS/.test(ua) ? 'Chrome iOS' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Other',
+  inTelegram,
+  telegramVersion: tg ? tg.version : null,
+  telegramPlatform: tg ? tg.platform : null,
+  liveCameraApi: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+  imageCaptureApi: typeof window.ImageCapture !== 'undefined',
+  screen: `${screen.width}x${screen.height} @${devicePixelRatio}`,
+};
+const $ = (id) => document.getElementById(id);
+const show = (id) => { document.querySelectorAll('.screen').forEach(s => s.classList.remove('on')); $(id).classList.add('on'); };
+const kv = (el, obj) => { el.innerHTML = Object.entries(obj).map(([k, v]) => `<span class="muted">${k}</span><b>${v}</b>`).join(''); };
+kv($('devinfo'), {
+  'Phone': `${info.os}, ${info.browser}`,
+  'Inside Telegram': inTelegram ? `yes (v${info.telegramVersion}, ${info.telegramPlatform})` : 'no (normal browser)',
+  'Live camera possible': info.liveCameraApi ? 'yes' : '<span class="bad">no</span>',
+});
+
+// ---------- Live camera ----------
+let stream = null, track = null, report = null;
+const video = $('video');
+
+async function openCamera() {
+  show('cam'); $('camchip').textContent = 'Starting camera…'; $('shutter').disabled = true; $('hint').textContent = 'Fit the whole screen inside the frame';
+  if (tg && tg.requestFullscreen) { try { tg.requestFullscreen(); } catch (e) {} }
+  if (!info.liveCameraApi) { fail('This browser does not allow a live camera on a web page.'); return; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 } } });
+  } catch (e) {
+    fail(e && e.name === 'NotAllowedError' ? 'Camera permission was refused. Allow the camera for this page and try again.' : `The camera could not start (${e && e.name}).`);
+    report = Object.assign({}, info, { liveCameraStarted: false, liveCameraError: e && e.name });
+    return;
+  }
+  track = stream.getVideoTracks()[0];
+  video.srcObject = stream;
+  await new Promise(res => { if (video.readyState >= 2) res(); else video.onloadedmetadata = () => res(); });
+  try { await video.play(); } catch (e) {}
+  const settings = safe(() => track.getSettings()) || {};
+  const caps = safe(() => track.getCapabilities()) || {};
+  const control = {
+    exposureModes: caps.exposureMode || null,
+    exposureTimeRange: caps.exposureTime ? [caps.exposureTime.min, caps.exposureTime.max, caps.exposureTime.step] : null,
+    isoRange: caps.iso ? [caps.iso.min, caps.iso.max] : null,
+    exposureCompensationRange: caps.exposureCompensation ? [caps.exposureCompensation.min, caps.exposureCompensation.max, caps.exposureCompensation.step] : null,
+    focusModes: caps.focusMode || null,
+    torch: caps.torch === true,
+    zoomRange: caps.zoom ? [caps.zoom.min, caps.zoom.max] : null,
+  };
+  // Apply what Screen mode can on this phone: EV bias, and a shutter floor if manual exposure exists.
+  const applied = {};
+  if (control.exposureCompensationRange) {
+    const [lo, hi] = control.exposureCompensationRange;
+    const ev = Math.max(lo, Math.min(hi, EV_BIAS));
+    if (await tryConstraint({ advanced: [{ exposureCompensation: ev }] })) applied.exposureCompensation = ev;
+  }
+  if (control.exposureModes && control.exposureModes.includes('manual') && control.exposureTimeRange) {
+    // exposureTime is in 1/10000 s units in the spec.
+    const cur = settings.exposureTime || 0, floor = MIN_SHUTTER_S * 10000;
+    if (cur && cur < floor) {
+      const t = Math.min(control.exposureTimeRange[1], floor);
+      if (await tryConstraint({ advanced: [{ exposureMode: 'manual', exposureTime: t }] })) applied.exposureTime = t;
+    }
+  }
+  const s2 = safe(() => track.getSettings()) || settings;
+  report = Object.assign({}, info, {
+    liveCameraStarted: true,
+    streamSize: `${s2.width}x${s2.height}`,
+    facing: s2.facingMode || null,
+    frameRate: s2.frameRate || null,
+    control, applied,
+    settingsNow: { exposureMode: s2.exposureMode || null, exposureTime: s2.exposureTime || null, iso: s2.iso || null, exposureCompensation: s2.exposureCompensation || null, focusMode: s2.focusMode || null },
+  });
+  $('camchip').textContent = `${s2.width}×${s2.height}${applied.exposureTime ? ' · shutter set' : applied.exposureCompensation != null ? ' · exposure set' : ' · auto'}`;
+  $('shutter').disabled = false;
+}
+function safe(f) { try { return f(); } catch (e) { return null; } }
+async function tryConstraint(c) { try { await track.applyConstraints(c); return true; } catch (e) { return false; } }
+function fail(msg) { $('camchip').textContent = 'Camera unavailable'; $('hint').textContent = msg; $('shutter').disabled = true; }
+function closeCamera() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; track = null; } if (tg && tg.exitFullscreen) { try { tg.exitFullscreen(); } catch (e) {} } }
+
+const full = document.createElement('canvas'), small = document.createElement('canvas');
+function grabFrame() {
+  const w = video.videoWidth, h = video.videoHeight;
+  full.width = w; full.height = h; full.getContext('2d').drawImage(video, 0, 0, w, h);
+  const sw = ANALYSIS_W, sh = Math.round(h * sw / w);
+  small.width = sw; small.height = sh; const c = small.getContext('2d'); c.drawImage(full, 0, 0, sw, sh);
+  const g = toGray(c.getImageData(0, 0, sw, sh).data, sw, sh);
+  return { w, h, g };
+}
+async function shoot() {
+  $('shutter').disabled = true; $('hint').textContent = 'Hold still…';
+  const sh = $('shutter'); const core = sh.innerHTML; sh.innerHTML = '<div class="spin"></div>';
+  const vw = video.clientWidth, vh = video.clientHeight;
+  const frames = [];
+  const t0 = performance.now();
+  for (let i = 0; i < BURST; i++) {
+    const f = grabFrame();
+    const region = guideToPhotoRegion(GUIDE, vw, vh, f.w, f.h);
+    const blob = await new Promise(r => full.toBlob(r, 'image/jpeg', 0.9));
+    frames.push({ i, q: assess(f.g), banding: bandingScore(f.g, region), w: f.w, h: f.h, blob });
+    if (i < BURST - 1) await new Promise(r => setTimeout(r, 120));
+  }
+  const best = pickBest(frames);
+  const blob = best.blob;
+  let takePhotoSize = null;
+  if (info.imageCaptureApi && track) {
+    try { const ic = new ImageCapture(track); const b = await ic.takePhoto(); const bm = await createImageBitmap(b); takePhotoSize = `${bm.width}x${bm.height} (${Math.round(b.size / 1024)} KB)`; bm.close && bm.close(); } catch (e) { takePhotoSize = `failed: ${e && e.name}`; }
+  }
+  const ms = Math.round(performance.now() - t0);
+  sh.innerHTML = core;
+  closeCamera();
+  showReview({
+    blobUrl: URL.createObjectURL(blob), jpegKb: Math.round(blob.size / 1024),
+    best, frames, ms, takePhotoSize, source: 'live-camera',
+  });
+}
+
+// ---------- Phone camera fallback ----------
+$('openNative').onclick = () => $('file').click();
+$('file').onchange = async (ev) => {
+  const file = ev.target.files && ev.target.files[0]; if (!file) return;
+  const buf = await file.arrayBuffer();
+  const exif = parseExif(new DataView(buf));
+  const bmp = await createImageBitmap(file);
+  const sw = ANALYSIS_W, shh = Math.round(bmp.height * sw / bmp.width);
+  small.width = sw; small.height = shh; const c = small.getContext('2d'); c.drawImage(bmp, 0, 0, sw, shh);
+  const g = toGray(c.getImageData(0, 0, sw, shh).data, sw, shh);
+  const q = assess(g);
+  report = Object.assign({}, info, { liveCameraStarted: null, nativeFile: { type: file.type, kb: Math.round(file.size / 1024), size: `${bmp.width}x${bmp.height}`, exif } });
+  showReview({ blobUrl: URL.createObjectURL(file), jpegKb: Math.round(file.size / 1024), best: { q, banding: bandingScore(g, GUIDE), w: bmp.width, h: bmp.height, i: 0 }, frames: [], ms: 0, takePhotoSize: null, source: 'phone-camera' });
+  ev.target.value = '';
+};
+// Minimal EXIF: is there an Exif block, a DateTimeOriginal, and a GPS section?
+function parseExif(dv) {
+  const out = { present: false, dateTimeOriginal: false, gps: false };
+  try {
+    if (dv.getUint16(0) !== 0xFFD8) return out;
+    let p = 2;
+    while (p + 4 < dv.byteLength) {
+      const marker = dv.getUint16(p); const len = dv.getUint16(p + 2);
+      if (marker === 0xFFE1 && dv.getUint32(p + 4) === 0x45786966) { // "Exif"
+        out.present = true;
+        const tiff = p + 10; const le = dv.getUint16(tiff) === 0x4949;
+        const u16 = (o) => dv.getUint16(o, le), u32 = (o) => dv.getUint32(o, le);
+        const ifd0 = tiff + u32(tiff + 4);
+        const walk = (ifd) => { const n = u16(ifd); const tags = {}; for (let i = 0; i < n; i++) { const e = ifd + 2 + i * 12; tags[u16(e)] = u32(e + 8); } return tags; };
+        const t0 = walk(ifd0);
+        if (t0[0x8825]) out.gps = true;
+        if (t0[0x8769]) { const ex = walk(tiff + t0[0x8769]); if (ex[0x9003]) out.dateTimeOriginal = true; }
+        return out;
+      }
+      if ((marker & 0xFF00) !== 0xFF00) break;
+      p += 2 + len;
+    }
+  } catch (e) {}
+  return out;
+}
+
+// ---------- Review ----------
+function showReview(r) {
+  const q = r.best.q;
+  $('shot').src = r.blobUrl;
+  $('stars').textContent = '★'.repeat(Math.floor(q.stars)) + (q.stars % 1 ? '½' : '') + '☆'.repeat(5 - Math.ceil(q.stars));
+  $('verdict').textContent = q.verdict;
+  $('sub').textContent = `Photo quality (approx.), ${r.source === 'live-camera' ? 'live camera in the page' : "phone's own camera"}`;
+  const bandNote = r.frames.length > 1
+    ? `Lines check: frames scored ${r.frames.map(f => f.banding.toFixed(3)).join(' / ')}, kept #${r.best.i + 1}.`
+    : `Lines check (single photo): ${r.best.banding.toFixed(3)}.`;
+  $('tips').innerHTML = (q.tips.length ? q.tips.map(t => `<p>${t}</p>`).join('') : '<p>No tips. Looks fine on sharpness and light.</p>') + `<p class="small muted">${bandNote} Lower is better; only compare shots of the same screen.</p>`;
+  const m = {
+    'Photo size': `${r.best.w}×${r.best.h}${r.jpegKb ? ` (${r.jpegKb} KB)` : ''}`,
+    'Sharpness': `${Math.round(q.sharpness * 100)}%`,
+    'Light': `${Math.round(q.exposure * 100)}%`,
+    'Average brightness': `${Math.round(q.measures.meanLuma)} / 255`,
+    'Blown-out area': `${Math.round(q.measures.brightShare * 100)}%`,
+  };
+  if (r.source === 'live-camera' && report) {
+    m['Exposure control'] = report.control.exposureModes ? report.control.exposureModes.join(', ') : '<span class="warn">none offered</span>';
+    m['Shutter control'] = report.control.exposureTimeRange ? `<span class="ok">yes</span>` : '<span class="warn">no</span>';
+    m['Applied'] = Object.keys(report.applied || {}).length ? JSON.stringify(report.applied) : 'auto only';
+    if (r.takePhotoSize) m['Full photo API'] = r.takePhotoSize;
+    m['Time for 3 shots'] = `${r.ms} ms`;
+  }
+  if (r.source === 'phone-camera' && report) {
+    const e = report.nativeFile.exif;
+    m['Photo data (EXIF)'] = e.present ? 'present' : '<span class="warn">stripped</span>';
+    m['Time taken in photo'] = e.dateTimeOriginal ? 'yes' : '<span class="warn">no</span>';
+    m['Location in photo'] = e.gps ? '<span class="ok">yes</span>' : '<span class="warn">no</span>';
+  }
+  kv($('measures'), m);
+  const full = Object.assign({}, report || info, {
+    result: { source: r.source, stars: q.stars, verdict: q.verdict, sharpness: +q.sharpness.toFixed(3), exposure: +q.exposure.toFixed(3), measures: q.measures, banding: +r.best.banding.toFixed(4), frames: r.frames.map(f => ({ banding: +f.banding.toFixed(4), sharp: +f.q.sharpness.toFixed(3) })), size: `${r.best.w}x${r.best.h}`, jpegKb: r.jpegKb, takePhoto: r.takePhotoSize, ms: r.ms },
+  });
+  $('report').textContent = JSON.stringify(full, null, 1);
+  show('review'); window.scrollTo(0, 0);
+}
+$('copy').onclick = async () => {
+  const text = $('report').textContent;
+  try { await navigator.clipboard.writeText(text); $('copy').textContent = 'Copied'; } catch (e) { try { if (navigator.share) await navigator.share({ text }); } catch (e2) {} }
+  setTimeout(() => $('copy').textContent = 'Copy report', 1500);
+};
+$('again').onclick = () => openCamera();
+$('home').onclick = () => show('start');
+$('openCam').onclick = () => openCamera();
+$('closeCam').onclick = () => { closeCamera(); show('start'); };
+$('shutter').onclick = () => shoot();
+document.addEventListener('visibilitychange', () => { if (document.hidden) closeCamera(); });
+})();
+</script>
+</body>
+</html>
