@@ -236,13 +236,14 @@ function openJob(j) {
           ${c.artwork.map((a, ai) => `<div class="art">
             ${(a.file_type || '').startsWith('image') ? `<img src="${esc(a.view_url)}" alt="">` : `<div style="width:96px;height:64px;border-radius:10px;background:#211914;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px">VIDEO</div>`}
             <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(a.side_label)}${a.label && a.label !== 'Artwork' && a.label !== a.side_label ? ` · ${esc(a.label)}` : ''}</div>
-              <button class="btn quiet small" data-save="${ci}:${ai}" style="margin-top:6px">Save</button></div>
+              <button class="btn quiet small" data-save="${ci}:${ai}" style="margin-top:6px">Save to Photos</button></div>
           </div>`).join('')}` : `<h2 style="margin-top:16px">Artwork for the screen</h2><p class="muted">Artwork not approved yet. The office will send it here once it is.</p>`}
       </div>`).join('')}
     <div class="card" id="photoCard"><h2>Your photos</h2><p class="muted" id="photoList">${j.photos.count ? 'Loading…' : 'No photos yet. When the screen is running, get the whole screen in with some of the activity around it.'}</p></div>`;
   $('jobBody').querySelectorAll('[data-route]').forEach((b) => b.onclick = () => openLink(job.campaigns[+b.dataset.route].route_url));
   $('jobBody').querySelectorAll('[data-save]').forEach((b) => b.onclick = () => saveArtwork(b, ...b.dataset.save.split(':').map(Number)));
   show('job');
+  prefetchArtwork(j);
   if (j.photos.count) loadPhotos();
 }
 
@@ -261,14 +262,33 @@ function openLink(url) {
   try { if (tg && tg.openLink) { tg.openLink(url); return; } } catch (e) {}
   window.open(url, '_blank');
 }
+// Saving artwork for the screen's media player.
+// 1) iPhone/Android share sheet with the file ("Save Image" / "Save Video" puts it in Photos).
+//    The share sheet only opens straight after a tap, so images are fetched when the job opens.
+// 2) Otherwise the bot sends the file into the driver's Telegram chat, where "Save to Photos" works.
+const artFiles = new Map();
+function prefetchArtwork(j) {
+  for (const c of j.campaigns) for (const a of c.artwork) {
+    if (artFiles.has(a.piece_id) || !(a.file_type || '').startsWith('image')) continue;
+    fetch(a.download_url).then((r) => r.ok ? r.blob() : null).then((b) => {
+      if (b) artFiles.set(a.piece_id, new File([b], a.file_name, { type: a.file_type || b.type || 'image/jpeg' }));
+    }).catch(() => {});
+  }
+}
 async function saveArtwork(btn, ci, ai) {
-  await fresh();
-  const a = job.campaigns[ci].artwork[ai];
+  const c = job.campaigns[ci], a = c.artwork[ai];
+  const file = artFiles.get(a.piece_id);
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); btn.textContent = 'Saved'; haptic('success'); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; /* share refused: fall through to chat */ }
+  }
+  btn.disabled = true; btn.textContent = 'Sending to chat…';
   try {
-    if (tg && tg.downloadFile && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) {
-      tg.downloadFile({ url: a.download_url, file_name: a.file_name }, (ok) => { if (ok) { btn.textContent = 'Saved'; haptic('success'); } });
-    } else openLink(a.download_url);
-  } catch (e) { openLink(a.download_url); }
+    await api('send-artwork', { campaign_id: c.id, piece_id: a.piece_id });
+    btn.textContent = 'Sent to chat';
+    toast('Sent to your chat with the bot. Open it, tap the artwork, then Save to Photos.', 6000);
+    haptic('success');
+  } catch (e) { btn.disabled = false; btn.textContent = 'Save'; toast('Could not send it. Check your signal and try again.'); }
 }
 
 // ---------- quality maths (same as the camera test and the app: sharpness + light only) ----------
