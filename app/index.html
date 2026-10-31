@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Showtime Driver</title>
+<meta name="description" content="Showtime Media driver app: today's job, artwork, route and campaign photos.">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg:#FFF7EC; --surface:#FFFFFF; --ink:#211914; --muted:#7A6A5E; --line:#EADFD2;
+    --accent:#FF5A00; --accent2:#FF8A00; --accentText:#C94100; --chip:#FFE8D6;
+    --ok:#2E7D32; --warn:#B26A00; --bad:#B3261E;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent} html,body{margin:0;height:100%}
+  body{font-family:Inter,-apple-system,system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+  .screen{display:none;min-height:100%;flex-direction:column}
+  .screen.on{display:flex}
+  .pad{padding:16px 20px}
+  .bottomPad{padding-bottom:calc(110px + env(safe-area-inset-bottom))}
+  h1{font-size:28px;line-height:1.1;letter-spacing:-.6px;margin:6px 0 4px;font-weight:800}
+  h2{font-size:15px;margin:0 0 8px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+  h3{font-size:20px;margin:0;font-weight:800;letter-spacing:-.3px}
+  p{line-height:1.45;margin:6px 0}
+  .muted{color:var(--muted)} .small{font-size:13px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:16px;margin-top:12px;box-shadow:0 14px 28px rgba(82,48,26,.08)}
+  .card.tap{cursor:pointer} .card.tap:active{transform:scale(.99)}
+  .row{display:flex;align-items:center;gap:10px}
+  .spread{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;background:var(--chip);color:var(--accentText)}
+  .chip.grey{background:#F1E9DF;color:var(--muted)}
+  .chip.green{background:#E5F4E4;color:var(--ok)}
+  .btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:999px;border:0;padding:0 22px;
+       font:900 15px/1 Inter,system-ui,sans-serif;letter-spacing:1.4px;text-transform:uppercase;color:#fff;
+       background:linear-gradient(135deg,var(--accent),var(--accent2));width:100%;cursor:pointer;text-decoration:none}
+  .btn.quiet{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+  .btn.small{min-height:44px;font-size:13px;letter-spacing:1px}
+  .btn:disabled{opacity:.45}
+  .btn + .btn{margin-top:10px}
+  .bottomBar{position:fixed;left:0;right:0;bottom:0;padding:14px 20px calc(14px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+  .art{display:flex;gap:12px;align-items:center;margin-top:12px}
+  .art img{width:96px;height:64px;object-fit:cover;border-radius:10px;background:#000;flex:none}
+  .brief{white-space:pre-wrap}
+  .center{text-align:center}
+  .big{font-size:40px;line-height:1}
+  .toast{position:fixed;left:16px;right:16px;bottom:calc(96px + env(safe-area-inset-bottom));background:#211914;color:#fff;padding:12px 16px;border-radius:14px;font-weight:600;font-size:14px;z-index:50;display:none}
+  .toast.on{display:block}
+  .spin{width:28px;height:28px;border:4px solid rgba(0,0,0,.12);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;margin:0 auto}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  /* camera */
+  #cam{background:#000;color:#fff;position:fixed;inset:0;z-index:20}
+  #cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+  #guide{position:absolute;left:7%;width:86%;top:25%;height:24%;pointer-events:none}
+  #guide i{position:absolute;width:38px;height:38px;border:0 solid #fff}
+  #guide i:nth-child(1){top:0;left:0;border-top-width:3px;border-left-width:3px;border-top-left-radius:8px}
+  #guide i:nth-child(2){top:0;right:0;border-top-width:3px;border-right-width:3px;border-top-right-radius:8px}
+  #guide i:nth-child(3){bottom:0;left:0;border-bottom-width:3px;border-left-width:3px;border-bottom-left-radius:8px}
+  #guide i:nth-child(4){bottom:0;right:0;border-bottom-width:3px;border-right-width:3px;border-bottom-right-radius:8px}
+  .camtop{position:absolute;top:0;left:0;right:0;padding:calc(12px + env(safe-area-inset-top) + var(--tg-content-safe-area-inset-top,0px)) 14px 0;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .round{width:48px;height:48px;border-radius:24px;background:rgba(0,0,0,.5);border:0;color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center}
+  .camchip{min-height:40px;padding:0 14px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font-weight:600;font-size:14px;display:flex;align-items:center;max-width:64%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cambottom{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;gap:14px;padding:16px 16px calc(28px + env(safe-area-inset-bottom));background:rgba(0,0,0,.4)}
+  .hint{font-weight:600;font-size:16px;text-shadow:0 0 6px rgba(0,0,0,.6);text-align:center}
+  .brands{display:flex;gap:8px;overflow-x:auto;max-width:100%;padding:2px}
+  .brand{flex:none;border:2px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45);color:#fff;border-radius:14px;padding:6px 10px;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px}
+  .brand img{width:44px;height:28px;object-fit:cover;border-radius:6px}
+  .brand.on{border-color:var(--accent);background:rgba(255,90,0,.25)}
+  #shutter{width:84px;height:84px;border-radius:42px;border:5px solid #fff;background:transparent;display:flex;align-items:center;justify-content:center;padding:0}
+  #shutter b{display:block;width:64px;height:64px;border-radius:32px;background:var(--accent)}
+  #shutter:disabled{opacity:.6}
+  .wspin{width:36px;height:36px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite}
+  /* review */
+  #review{background:#16110E;color:#F4F5F7}
+  #review .card{background:#221A15;border-color:#3A2E27;box-shadow:none;color:#F4F5F7}
+  #review .muted{color:#B8A99C}
+  #review .bottomBar{background:#16110E;border-top-color:#3A2E27}
+  #review .btn.quiet{background:#221A15;color:#F4F5F7;border-color:#3A2E27}
+  .photo{border-radius:22px;overflow:hidden;background:#000;aspect-ratio:3/4;max-height:48vh;margin:0 auto}
+  .photo img{width:100%;height:100%;object-fit:contain;display:block}
+  .stars{font-size:30px;letter-spacing:4px;color:var(--accent)}
+  .verdict{font-size:26px;font-weight:800;margin-top:6px}
+  input[type=file]{display:none}
+</style>
+</head>
+<body>
+
+<section id="loading" class="screen on"><div class="pad" style="margin:auto"><div class="spin"></div><p class="muted center">Loading your jobs…</p></div></section>
+
+<section id="message" class="screen"><div class="pad" style="margin:auto;max-width:420px">
+  <h1 id="msgTitle">Showtime Driver</h1><p class="muted" id="msgBody"></p>
+  <button class="btn quiet" id="msgRetry" style="margin-top:16px">Try again</button>
+</div></section>
+
+<section id="myday" class="screen"><div class="pad bottomPad">
+  <p class="muted small" id="hello"></p>
+  <h1>My Day</h1>
+  <div id="jobs"></div>
+</div></section>
+
+<section id="job" class="screen"><div class="pad bottomPad" id="jobBody"></div>
+  <div class="bottomBar"><button class="btn" id="takePhoto">Take photo</button></div>
+</section>
+
+<section id="cam" class="screen">
+  <video id="video" autoplay playsinline muted></video>
+  <div id="guide"><i></i><i></i><i></i><i></i></div>
+  <div class="camtop">
+    <button class="round" id="closeCam" aria-label="Close camera">✕</button>
+    <div class="camchip" id="camchip">Starting camera…</div>
+    <div style="width:48px"></div>
+  </div>
+  <div class="cambottom">
+    <div class="brands" id="brands"></div>
+    <div class="hint" id="hint">Fit the whole screen inside the frame</div>
+    <button id="shutter" aria-label="Take photo" disabled><b></b></button>
+  </div>
+</section>
+
+<section id="review" class="screen"><div class="pad bottomPad">
+  <div class="photo"><img id="shot" alt="The photo you just took"></div>
+  <div class="center" style="margin-top:14px">
+    <div class="stars" id="stars"></div>
+    <div class="verdict" id="verdict"></div>
+    <div class="muted small" id="reviewSub"></div>
+  </div>
+  <div class="card" id="tips"></div>
+  <p class="muted small center">The phone checks sharpness and light only. The official rating comes from Media Studio once the office processes the photo.</p>
+</div>
+  <div class="bottomBar"><button class="btn" id="keep">Keep photo</button><button class="btn quiet" id="retake">Retake</button></div>
+</section>
+
+<input type="file" id="file" accept="image/*" capture="environment">
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+'use strict';
+const API = 'https://bzexcmuzujoeeumzdlvb.supabase.co/functions/v1/driver-app';
+const tg = window.Telegram && window.Telegram.WebApp;
+const initData = tg && tg.initData ? tg.initData : '';
+if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor && tg.setHeaderColor('#FFF7EC'); tg.setBackgroundColor && tg.setBackgroundColor('#FFF7EC'); } catch (e) {} }
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let current = 'loading';
+const stack = [];
+function show(id, push = true) {
+  if (push && current && current !== id && !['loading', 'message', 'cam', 'review'].includes(current)) stack.push(current);
+  document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
+  $(id).classList.add('on'); current = id; window.scrollTo(0, 0);
+  if (tg && tg.BackButton) { (id === 'job') ? tg.BackButton.show() : tg.BackButton.hide(); }
+}
+function back() { const prev = stack.pop() || 'myday'; show(prev, false); if (prev === 'myday') renderMyDay(); }
+if (tg && tg.BackButton) tg.BackButton.onClick(back);
+function toast(msg, ms = 3000) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), ms); }
+function message(title, body, retry) {
+  $('msgTitle').textContent = title; $('msgBody').textContent = body;
+  $('msgRetry').style.display = retry ? '' : 'none'; $('msgRetry').onclick = retry || null;
+  show('message', false);
+}
+function haptic(kind) { try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(kind); } catch (e) {} }
+
+async function api(action, body = {}) {
+  const r = await fetch(`${API}?action=${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: initData, ...body }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.message || `Error ${r.status}`); e.code = j.error; e.status = r.status; throw e; }
+  return j;
+}
+
+// ---------- dates ----------
+const WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function dayLabel(iso, today) {
+  const d = new Date(iso + 'T12:00:00Z'), t = new Date(today + 'T12:00:00Z');
+  const diff = Math.round((d - t) / 864e5);
+  const dd = iso.slice(8, 10) + '-' + iso.slice(5, 7);
+  if (diff === 0) return `Today, ${WEEK[d.getUTCDay()]} ${dd}`;
+  if (diff === 1) return `Tomorrow, ${WEEK[d.getUTCDay()]} ${dd}`;
+  if (diff === -1) return `Yesterday, ${WEEK[d.getUTCDay()]} ${dd}`;
+  return `${WEEK[d.getUTCDay()]} ${dd}`;
+}
+const hhmm = (t) => (t ? String(t).slice(0, 5) : '');
+const timeRange = (a, b) => (a && b ? `${hhmm(a)}–${hhmm(b)}` : hhmm(a || b));
+
+// ---------- state ----------
+let data = null, job = null, loadedAt = 0;
+async function load() {
+  if (!initData) { message('Open from Telegram', 'This page works inside the Showtime Driver bot in Telegram. Open the bot and tap My Day.'); return; }
+  show('loading', false);
+  try { data = await api('my-day'); loadedAt = Date.now(); renderMyDay(); show('myday', false); processQueue(); }
+  catch (e) {
+    if (e.code === 'not_linked') message('Not connected yet', 'This Telegram account is not connected to a Showtime driver. Ask the office for your connection link and tap it.');
+    else if (e.code === 'unauthorized') message('Open from Telegram', 'Close this page and open it again from the Showtime Driver bot.', load);
+    else message('Could not load your jobs', 'Check your signal and try again.', load);
+  }
+}
+// Signed artwork links last 10 minutes: refresh quietly before using them.
+async function fresh() { if (Date.now() - loadedAt > 8 * 60_000) { try { data = await api('my-day'); loadedAt = Date.now(); if (job) job = data.jobs.find((j) => j.key === job.key) || job; } catch (e) {} } }
+
+function renderMyDay() {
+  if (!data) return;
+  $('hello').textContent = `Hi ${data.driver.name}`;
+  const jobs = data.jobs;
+  if (!jobs.length) { $('jobs').innerHTML = `<div class="card"><h3>No jobs right now</h3><p class="muted">When the office assigns you to a van, it shows here and the bot messages you.</p></div>`; return; }
+  $('jobs').innerHTML = jobs.map((j, i) => {
+    const names = j.campaigns.map((c) => esc(c.brand || c.name)).join(', ');
+    const times = [...new Set(j.campaigns.map((c) => timeRange(c.time_from, c.time_to)).filter(Boolean))].join(' · ');
+    const where = j.campaigns.map((c) => c.venue || c.location).filter(Boolean)[0] || '';
+    const p = j.photos;
+    const photoChip = p.count ? `<span class="chip ${p.retake ? '' : 'green'}">${p.count} photo${p.count === 1 ? '' : 's'}${p.retake ? ` · ${p.retake} retake` : ''}</span>` : '';
+    return `<div class="card tap" data-i="${i}">
+      <div class="spread"><span class="muted small" style="font-weight:700">${esc(dayLabel(j.date, data.today))}</span><span class="chip grey">${esc(j.vehicle.name)}</span></div>
+      <h3 style="margin-top:8px">${j.campaigns.length > 1 ? `${j.campaigns.length} brands` : names}</h3>
+      ${j.campaigns.length > 1 ? `<p class="muted small">${names}</p>` : ''}
+      <p class="muted" style="margin-bottom:0">${esc(times)}${where ? ` · ${esc(where)}` : ''}</p>
+      <div class="row" style="margin-top:8px;gap:6px">${photoChip}${j.second_driver ? '<span class="chip grey">Second driver</span>' : ''}</div>
+    </div>`;
+  }).join('');
+  $('jobs').querySelectorAll('.card.tap').forEach((el) => el.onclick = () => openJob(jobs[+el.dataset.i]));
+}
+
+function openJob(j) {
+  job = j;
+  const multi = j.campaigns.length > 1;
+  $('jobBody').innerHTML = `
+    <p class="muted small" style="font-weight:700">${esc(dayLabel(j.date, data.today))} · ${esc(j.vehicle.name)}</p>
+    <h1>${multi ? `${j.campaigns.length} brands today` : esc(j.campaigns[0].brand || j.campaigns[0].name)}</h1>
+    ${j.note ? `<div class="card"><h2>Note from the office</h2><p class="brief">${esc(j.note)}</p></div>` : ''}
+    ${j.campaigns.map((c, ci) => `
+      <div class="card">
+        ${multi ? `<h3>${esc(c.brand || c.name)}</h3>` : ''}
+        <p class="muted" style="margin-top:${multi ? 4 : 0}px">${esc(timeRange(c.time_from, c.time_to))}${(c.venue || c.location) ? ` · ${esc(c.venue || c.location)}` : ''}</p>
+        ${c.route_url ? `<button class="btn quiet small" data-route="${ci}" style="margin-top:10px">Start route</button><p class="muted small center" style="margin:6px 0 0">Opens Google Maps</p>` : '<p class="muted small">No route for today yet.</p>'}
+        ${c.brief ? `<h2 style="margin-top:16px">Instructions</h2><p class="brief">${esc(c.brief)}</p>` : ''}
+        ${c.artwork.length ? `<h2 style="margin-top:16px">Artwork for the screen</h2>
+          ${c.artwork.map((a, ai) => `<div class="art">
+            ${(a.file_type || '').startsWith('image') ? `<img src="${esc(a.view_url)}" alt="">` : `<div style="width:96px;height:64px;border-radius:10px;background:#211914;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px">VIDEO</div>`}
+            <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(a.side_label)}${a.label && a.label !== 'Artwork' && a.label !== a.side_label ? ` · ${esc(a.label)}` : ''}</div>
+              <button class="btn quiet small" data-save="${ci}:${ai}" style="margin-top:6px">Save</button></div>
+          </div>`).join('')}` : ''}
+      </div>`).join('')}
+    <div class="card" id="photoCard"><h2>Your photos</h2><p class="muted" id="photoList">${j.photos.count ? 'Loading…' : 'No photos yet. When the screen is running, get the whole screen in with some of the activity around it.'}</p></div>`;
+  $('jobBody').querySelectorAll('[data-route]').forEach((b) => b.onclick = () => openLink(job.campaigns[+b.dataset.route].route_url));
+  $('jobBody').querySelectorAll('[data-save]').forEach((b) => b.onclick = () => saveArtwork(b, ...b.dataset.save.split(':').map(Number)));
+  show('job');
+  if (j.photos.count) loadPhotos();
+}
+
+const STATUS = { uploading: 'Uploading', held: 'Uploaded, waiting for the office', processing: 'Office is processing it', processed: 'Rated by Media Studio', in_gallery: 'In the client gallery', retake_requested: 'Office asked for a retake' };
+async function loadPhotos() {
+  try {
+    const r = await api('photos', { vehicle_id: job.vehicle.id, campaign_day: job.date });
+    const pending = (await queueAll()).filter((q) => q.vehicle_id === job.vehicle.id && q.campaign_day === job.date && q.state !== 'done').length;
+    $('photoList').innerHTML = (pending ? `<p><b>${pending} waiting to upload</b>. Keep this page open with signal.</p>` : '') +
+      (r.photos.length ? r.photos.map((p) => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)"><span>${new Date(p.captured_at).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' })}${p.stars ? ` · approx. ${p.stars}★` : ''}</span><span class="muted small">${esc(STATUS[p.status] || p.status)}</span></div>`).join('') : '');
+  } catch (e) { $('photoList').textContent = 'Could not load your photos.'; }
+}
+
+function openLink(url) {
+  if (!url) return;
+  try { if (tg && tg.openLink) { tg.openLink(url); return; } } catch (e) {}
+  window.open(url, '_blank');
+}
+async function saveArtwork(btn, ci, ai) {
+  await fresh();
+  const a = job.campaigns[ci].artwork[ai];
+  try {
+    if (tg && tg.downloadFile && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) {
+      tg.downloadFile({ url: a.download_url, file_name: a.file_name }, (ok) => { if (ok) { btn.textContent = 'Saved'; haptic('success'); } });
+    } else openLink(a.download_url);
+  } catch (e) { openLink(a.download_url); }
+}
+
+// ---------- quality maths (same as the camera test and the app: sharpness + light only) ----------
+const T = { blurVar: 20, sharpVar: 300, dark: 16, bright: 245, meanLow: 70, meanHigh: 180, darkShareOk: 0.35, brightShareOk: 0.25 };
+const clamp = (n, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, n));
+function toGray(rgba, w, h) { const o = new Uint8Array(w * h); for (let i = 0, p = 0; i < o.length; i++, p += 4) o[i] = (rgba[p] * 299 + rgba[p + 1] * 587 + rgba[p + 2] * 114 + 500) / 1000; return { data: o, width: w, height: h }; }
+function lapVar({ data, width: w, height: h }) { let s = 0, q = 0, n = 0; for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x, v = data[i - w] + data[i + w] + data[i - 1] + data[i + 1] - 4 * data[i]; s += v; q += v * v; n++; } const m = s / n; return q / n - m * m; }
+function expStats({ data }) { let t = 0, d = 0, b = 0; for (let i = 0; i < data.length; i++) { const v = data[i]; t += v; if (v < T.dark) d++; if (v >= T.bright) b++; } const n = data.length || 1; return { meanLuma: t / n, darkShare: d / n, brightShare: b / n }; }
+const sharpScore = (lv) => { const lo = Math.log10(T.blurVar), hi = Math.log10(T.sharpVar); return clamp((Math.log10(Math.max(lv, 1e-6)) - lo) / (hi - lo)); };
+function expScore(m, d, b) { let p = 1; if (m < T.meanLow) p = clamp((m - 20) / (T.meanLow - 20)); else if (m > T.meanHigh) p = clamp((235 - m) / (235 - T.meanHigh)); return p * (1 - clamp((d - T.darkShareOk) / 0.4)) * (1 - clamp((b - T.brightShareOk) / 0.4)); }
+const halfStars = (s) => clamp(Math.round((1 + 4 * clamp(s)) * 2) / 2, 1, 5);
+const verdictFor = (st) => st >= 4.5 ? 'Excellent' : st >= 3.5 ? 'Good' : st >= 2.5 ? 'Could be better' : 'Retake recommended';
+function assess(g) {
+  const lv = lapVar(g), e = expStats(g), sharpness = sharpScore(lv), exposure = expScore(e.meanLuma, e.darkShare, e.brightShare);
+  let stars = halfStars(0.5 * sharpness + 0.5 * exposure); if (sharpness < 0.25) stars = Math.min(stars, 2);
+  const tips = [];
+  if (sharpness < 0.25) tips.push('The photo is blurred. Hold your phone steady and retake.'); else if (sharpness < 0.5) tips.push('Hold your phone steady.');
+  if (e.meanLuma < T.meanLow || e.darkShare > T.darkShareOk) tips.push('Too dark. Move closer to the screen or turn towards the light.');
+  if (e.meanLuma > T.meanHigh || e.brightShare > T.brightShareOk) tips.push('Too bright. Avoid glare and direct sun behind the screen.');
+  return { stars, verdict: verdictFor(stars), sharpness, exposure, tips: tips.slice(0, 3), measures: { laplacianVariance: lv, ...e } };
+}
+const GUIDE = { x: 0.07, y: 0.25, w: 0.86, h: 0.24 };
+function guideRegion(g, vw, vh, pw, ph) { if (!(vw > 0 && vh > 0 && pw > 0 && ph > 0)) return g; const s = Math.max(vw / pw, vh / ph), sw = vw / (pw * s), sh = vh / (ph * s), ox = (1 - sw) / 2, oy = (1 - sh) / 2, x = clamp(ox + g.x * sw), y = clamp(oy + g.y * sh); return { x, y, w: clamp(g.w * sw, 0, 1 - x), h: clamp(g.h * sh, 0, 1 - y) }; }
+function banding({ data, width, height }, r) {
+  const x0 = Math.floor(r.x * width), x1 = Math.max(x0 + 1, Math.floor((r.x + r.w) * width)), y0 = Math.floor(r.y * height), y1 = Math.max(y0 + 1, Math.floor((r.y + r.h) * height));
+  const rows = []; for (let y = y0; y < y1; y++) { let s = 0; for (let x = x0; x < x1; x++) s += data[y * width + x]; rows.push(s / (x1 - x0)); }
+  if (rows.length < 5) return 0; const half = Math.max(2, Math.round(rows.length / 16)); let sq = 0, tot = 0;
+  for (let i = 0; i < rows.length; i++) { let s = 0, n = 0; for (let j = Math.max(0, i - half); j <= Math.min(rows.length - 1, i + half); j++) { s += rows[j]; n++; } const d = rows[i] - s / n; sq += d * d; tot += rows[i]; }
+  return Math.sqrt(sq / rows.length) / Math.max(tot / rows.length, 1);
+}
+
+// ---------- location (asked at the shutter; never tracked) ----------
+function getLocation(timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    let done = false; const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    setTimeout(() => finish({ gps_status: 'unavailable' }), timeoutMs);
+    const lm = tg && tg.LocationManager;
+    const viaBrowser = () => {
+      if (!navigator.geolocation) return finish({ gps_status: 'unavailable' });
+      navigator.geolocation.getCurrentPosition((p) => finish({ gps_status: 'ok', latitude: p.coords.latitude, longitude: p.coords.longitude, gps_accuracy_m: p.coords.accuracy }),
+        (e) => finish({ gps_status: e && e.code === 1 ? 'denied' : 'unavailable' }), { enableHighAccuracy: true, timeout: timeoutMs - 200, maximumAge: 30000 });
+    };
+    if (lm && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) {
+      const ask = () => { if (!lm.isLocationAvailable) return viaBrowser(); lm.getLocation((loc) => loc ? finish({ gps_status: 'ok', latitude: loc.latitude, longitude: loc.longitude, gps_accuracy_m: loc.horizontal_accuracy ?? null }) : finish({ gps_status: 'denied' })); };
+      try { lm.isInited ? ask() : lm.init(ask); } catch (e) { viaBrowser(); }
+    } else viaBrowser();
+  });
+}
+
+// ---------- camera ----------
+let stream = null, track = null, chosen = null, pending = null, locPromise = null;
+const video = $('video');
+async function openCamera() {
+  await fresh();
+  show('cam', true);
+  $('camchip').textContent = `${job.vehicle.name}`;
+  $('shutter').disabled = true; $('hint').textContent = 'Fit the whole screen inside the frame';
+  // Brand picker only when the van runs more than one campaign today.
+  const cs = job.campaigns; chosen = cs.length === 1 ? { campaign: cs[0].id } : null;
+  if (cs.length > 1) {
+    $('brands').innerHTML = cs.map((c, i) => { const a = c.artwork[0]; return `<button class="brand" data-b="${i}">${a && (a.file_type || '').startsWith('image') ? `<img src="${esc(a.view_url)}" alt="">` : ''}${esc(c.brand || c.name)}</button>`; }).join('') + `<button class="brand on" data-b="-1">Not sure</button>`;
+    $('brands').querySelectorAll('.brand').forEach((b) => b.onclick = () => { $('brands').querySelectorAll('.brand').forEach((x) => x.classList.remove('on')); b.classList.add('on'); const i = +b.dataset.b; chosen = i < 0 ? null : { campaign: cs[i].id, piece: cs[i].artwork[0] ? cs[i].artwork[0].piece_id : null }; });
+    $('hint').textContent = 'Tap the brand on the screen, then fit it in the frame';
+  } else $('brands').innerHTML = '';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 } } });
+  } catch (e) {
+    $('camchip').textContent = 'Camera unavailable';
+    $('hint').innerHTML = (e && e.name === 'NotAllowedError' ? 'Camera permission was refused.' : 'The camera could not start.') + ' <u id="useNative">Use the phone camera instead</u>';
+    $('useNative').onclick = () => { closeCamera(); $('file').click(); };
+    return;
+  }
+  track = stream.getVideoTracks()[0]; video.srcObject = stream;
+  await new Promise((r) => { if (video.readyState >= 2) r(); else video.onloadedmetadata = () => r(); });
+  try { await video.play(); } catch (e) {}
+  // Screen mode on phones that allow it (Android): exposure a little down, shutter no faster than 1/50 s.
+  const caps = (track.getCapabilities && track.getCapabilities()) || {}; const settings = (track.getSettings && track.getSettings()) || {};
+  const applied = {};
+  try { if (caps.exposureCompensation) { const ev = Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, -0.7)); await track.applyConstraints({ advanced: [{ exposureCompensation: ev }] }); applied.exposureCompensation = ev; } } catch (e) {}
+  try { if (caps.exposureMode && caps.exposureMode.includes('manual') && caps.exposureTime && settings.exposureTime && settings.exposureTime < 200) { await track.applyConstraints({ advanced: [{ exposureMode: 'manual', exposureTime: Math.min(caps.exposureTime.max, 200) }] }); applied.exposureTime = 200; } } catch (e) {}
+  pending = { screen_mode: { applied, exposure_control: !!caps.exposureMode, shutter_control: !!caps.exposureTime } };
+  $('shutter').disabled = false;
+}
+function closeCamera() { if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; track = null; } }
+const full = document.createElement('canvas'), small = document.createElement('canvas'), bestCanvas = document.createElement('canvas');
+async function shoot() {
+  $('shutter').disabled = true; $('hint').textContent = 'Hold still…';
+  const sh = $('shutter'), core = sh.innerHTML; sh.innerHTML = '<div class="wspin"></div>';
+  locPromise = getLocation();
+  const capturedAt = new Date().toISOString();
+  const vw = video.clientWidth, vh = video.clientHeight, w = video.videoWidth, h = video.videoHeight;
+  // Three quick frames; keep the best so far in its own canvas (only two full frames in memory).
+  // Best = sharpest within 10%, then least banding.
+  const region = guideRegion(GUIDE, vw, vh, w, h);
+  bestCanvas.width = w; bestCanvas.height = h;
+  let best = null;
+  for (let i = 0; i < 3; i++) {
+    full.width = w; full.height = h; full.getContext('2d').drawImage(video, 0, 0, w, h);
+    const sw = 320, shh = Math.round(h * sw / w); small.width = sw; small.height = shh;
+    const c = small.getContext('2d'); c.drawImage(full, 0, 0, sw, shh);
+    const g = toGray(c.getImageData(0, 0, sw, shh).data, sw, shh);
+    const f = { q: assess(g), b: banding(g, region) };
+    const better = !best || f.q.sharpness > best.q.sharpness * 1.1 || (f.q.sharpness >= best.q.sharpness * 0.9 && f.b < best.b);
+    if (better) { best = f; bestCanvas.getContext('2d').drawImage(full, 0, 0); }
+    if (i < 2) await new Promise((r) => setTimeout(r, 120));
+  }
+  const blob = await new Promise((r) => bestCanvas.toBlob(r, 'image/jpeg', 0.9));
+  sh.innerHTML = core; closeCamera();
+  pending = Object.assign(pending || {}, { blob, width: w, height: h, q: best.q, banding: best.b, captured_at: capturedAt, capture_source: 'mini_app_camera' });
+  showReview();
+}
+// Fallback: the phone's own camera.
+$('file').onchange = async (ev) => {
+  const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (!f) return;
+  locPromise = getLocation();
+  const bmp = await createImageBitmap(f); const sw = 320, shh = Math.round(bmp.height * sw / bmp.width);
+  small.width = sw; small.height = shh; const c = small.getContext('2d'); c.drawImage(bmp, 0, 0, sw, shh);
+  const g = toGray(c.getImageData(0, 0, sw, shh).data, sw, shh);
+  pending = { blob: f, width: bmp.width, height: bmp.height, q: assess(g), banding: banding(g, GUIDE), captured_at: new Date().toISOString(), capture_source: 'phone_camera', screen_mode: { applied: {}, fallback: true } };
+  showReview();
+};
+function showReview() {
+  const q = pending.q;
+  $('shot').src = URL.createObjectURL(pending.blob);
+  $('stars').textContent = '★'.repeat(Math.floor(q.stars)) + (q.stars % 1 ? '½' : '') + '☆'.repeat(5 - Math.ceil(q.stars));
+  $('verdict').textContent = q.verdict;
+  const brand = chosen && job.campaigns.find((c) => c.id === chosen.campaign);
+  $('reviewSub').textContent = `Photo quality (approx.)${brand && job.campaigns.length > 1 ? ` · ${brand.brand || brand.name}` : ''}`;
+  $('tips').innerHTML = q.tips.length ? q.tips.map((t) => `<p>${esc(t)}</p>`).join('') : '<p>Looks fine on sharpness and light.</p>';
+  show('review', false);
+}
+
+// ---------- upload queue (IndexedDB, survives closing the page) ----------
+const DB = 'showtime-driver', STORE = 'uploads';
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open(DB, 1); r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function tx(mode, fn) { const db = await idb(); return new Promise((res, rej) => { const t = db.transaction(STORE, mode); const s = t.objectStore(STORE); const out = fn(s); t.oncomplete = () => res(out && out.result !== undefined ? out.result : out); t.onerror = () => rej(t.error); }); }
+const queuePut = (item) => tx('readwrite', (s) => s.put(item));
+const queueDel = (id) => tx('readwrite', (s) => s.delete(id));
+const queueAll = () => tx('readonly', (s) => s.getAll()).catch(() => []);
+async function sha256(blob) { try { const d = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()); return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join(''); } catch (e) { return null; } }
+
+let processing = false;
+async function processQueue() {
+  if (processing) return; processing = true;
+  try {
+    for (const item of await queueAll()) {
+      try {
+        if (!item.evidence_id) {
+          const r = await api('upload-intent', item.meta);
+          item.evidence_id = r.evidence_id; item.upload_url = r.upload_url; await queuePut(item);
+        }
+        if (!item.uploaded) {
+          const put = await fetch(item.upload_url, { method: 'PUT', headers: { 'Content-Type': item.meta.mime_type, 'x-upsert': 'false' }, body: item.blob });
+          if (!put.ok && put.status !== 409) throw new Error(`upload ${put.status}`);
+          item.uploaded = true; await queuePut(item);
+        }
+        await api('upload-complete', { evidence_id: item.evidence_id, sha256: item.sha256 });
+        await queueDel(item.id);
+        toast('Photo uploaded. Waiting for the office.'); haptic('success');
+      } catch (e) {
+        if (e.code === 'not_assigned' || e.status === 400) { await queueDel(item.id); toast('A photo could not be filed to this job and was removed.'); }
+        // otherwise leave it queued; next open or next photo retries
+      }
+    }
+  } finally { processing = false; if (current === 'job' && job) loadPhotos(); }
+}
+async function keep() {
+  $('keep').disabled = true;
+  const loc = await (locPromise || Promise.resolve({ gps_status: 'unknown' }));
+  const q = pending.q;
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    vehicle_id: job.vehicle.id, campaign_day: job.date,
+    blob: pending.blob, sha256: await sha256(pending.blob),
+    meta: {
+      vehicle_id: job.vehicle.id, campaign_day: job.date,
+      hint_campaign_id: chosen ? chosen.campaign : null, hint_artwork_piece_id: chosen ? chosen.piece || null : null,
+      mime_type: pending.blob.type || 'image/jpeg', width: pending.width, height: pending.height,
+      captured_at: pending.captured_at, capture_source: pending.capture_source,
+      phone_stars: q.stars, phone_sharpness: +q.sharpness.toFixed(3), phone_exposure: +q.exposure.toFixed(3), phone_banding: +pending.banding.toFixed(4), phone_measures: q.measures,
+      screen_mode: pending.screen_mode || null, ...loc,
+    },
+  };
+  await queuePut(item);
+  pending = null; $('keep').disabled = false;
+  show('job', false); job.photos.count++; loadPhotos();
+  toast('Saved. Uploading…');
+  processQueue();
+}
+
+// ---------- wiring ----------
+$('takePhoto').onclick = () => openCamera();
+$('closeCam').onclick = () => { closeCamera(); show('job', false); };
+$('shutter').onclick = () => shoot();
+$('keep').onclick = () => keep();
+$('retake').onclick = () => { pending = null; openCamera(); };
+document.addEventListener('visibilitychange', () => { if (document.hidden) closeCamera(); else processQueue(); });
+window.addEventListener('online', () => processQueue());
+load();
+})();
+</script>
+</body>
+</html>
