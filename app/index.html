@@ -65,6 +65,9 @@
   .brand{flex:none;border:2px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45);color:#fff;border-radius:14px;padding:6px 10px;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px}
   .brand img{width:44px;height:28px;object-fit:cover;border-radius:6px}
   .brand.on{border-color:var(--accent);background:rgba(255,90,0,.25)}
+  .lenses{display:flex;gap:6px;background:rgba(0,0,0,.45);border-radius:999px;padding:4px}
+  .lens{border:0;background:transparent;color:#fff;font-weight:700;font-size:13px;min-width:44px;height:34px;border-radius:17px;padding:0 10px}
+  .lens.on{background:#fff;color:#000}
   #shutter{width:84px;height:84px;border-radius:42px;border:5px solid #fff;background:transparent;display:flex;align-items:center;justify-content:center;padding:0}
   #shutter b{display:block;width:64px;height:64px;border-radius:32px;background:var(--accent)}
   #shutter:disabled{opacity:.6}
@@ -113,6 +116,7 @@
   <div class="cambottom">
     <div class="brands" id="brands"></div>
     <div class="hint" id="hint">Fit the whole screen inside the frame</div>
+    <div class="lenses" id="lenses" hidden></div>
     <button id="shutter" aria-label="Take photo" disabled><b></b></button>
   </div>
 </section>
@@ -359,13 +363,26 @@ async function openCamera() {
     $('brands').querySelectorAll('.brand').forEach((b) => b.onclick = () => { $('brands').querySelectorAll('.brand').forEach((x) => x.classList.remove('on')); b.classList.add('on'); const i = +b.dataset.b; chosen = i < 0 ? null : { campaign: cs[i].id, piece: cs[i].artwork[0] ? cs[i].artwork[0].piece_id : null }; });
     $('hint').textContent = 'Tap the brand on the screen, then fit it in the frame';
   } else $('brands').innerHTML = '';
+  $('lenses').hidden = true; $('lenses').innerHTML = ''; zoom = 1; video.style.transform = '';
+  if (!(await startStream(null))) return;
+  await discoverLenses();
+  renderLenses();
+  $('shutter').disabled = false;
+}
+
+// Start (or restart) the rear camera. deviceId null = whatever the phone picks as "environment".
+async function startStream(deviceId) {
+  closeCamera();
+  const videoC = { width: { ideal: 4096 }, height: { ideal: 3072 } };
+  if (deviceId) videoC.deviceId = { exact: deviceId }; else videoC.facingMode = { ideal: 'environment' };
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 } } });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoC });
   } catch (e) {
+    if (deviceId) return false; // lens switch failed; caller keeps the old lens
     $('camchip').textContent = 'Camera unavailable';
     $('hint').innerHTML = (e && e.name === 'NotAllowedError' ? 'Camera permission was refused.' : 'The camera could not start.') + ' <u id="useNative">Use the phone camera instead</u>';
     $('useNative').onclick = () => { closeCamera(); $('file').click(); };
-    return;
+    return false;
   }
   track = stream.getVideoTracks()[0]; video.srcObject = stream;
   await new Promise((r) => { if (video.readyState >= 2) r(); else video.onloadedmetadata = () => r(); });
@@ -375,24 +392,90 @@ async function openCamera() {
   const applied = {};
   try { if (caps.exposureCompensation) { const ev = Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, -0.7)); await track.applyConstraints({ advanced: [{ exposureCompensation: ev }] }); applied.exposureCompensation = ev; } } catch (e) {}
   try { if (caps.exposureMode && caps.exposureMode.includes('manual') && caps.exposureTime && settings.exposureTime && settings.exposureTime < 200) { await track.applyConstraints({ advanced: [{ exposureMode: 'manual', exposureTime: Math.min(caps.exposureTime.max, 200) }] }); applied.exposureTime = 200; } } catch (e) {}
-  pending = { screen_mode: { applied, exposure_control: !!caps.exposureMode, shutter_control: !!caps.exposureTime } };
-  $('shutter').disabled = false;
+  // Hardware zoom range, when the phone exposes one (most Androids; iPhones on recent iOS).
+  hwZoom = caps.zoom && isFinite(caps.zoom.min) && isFinite(caps.zoom.max) && caps.zoom.max > caps.zoom.min ? { min: caps.zoom.min, max: caps.zoom.max } : null;
+  zoom = 1; video.style.transform = '';
+  pending = { screen_mode: { applied, exposure_control: !!caps.exposureMode, shutter_control: !!caps.exposureTime, hardware_zoom: !!hwZoom } };
+  return true;
 }
 function closeCamera() { if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; track = null; } }
+
+// ---------- lenses and zoom ----------
+// Wide angle comes from the phone's ultra-wide lens, which is a separate camera device.
+// iPhones name them "Back Ultra Wide Camera" / "Back Camera" / "Back Telephoto Camera";
+// Androids vary, so unlabelled phones fall back to the zoom range instead.
+let lenses = [], lensIdx = 0, hwZoom = null, zoom = 1;
+const DIGITAL_MAX = 3;
+async function discoverLenses() {
+  lenses = [];
+  try {
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput' && d.label);
+    const back = devs.filter((d) => /back|rear|environment|world/i.test(d.label) && !/dual|triple|fusion|wide camera$/i.test(d.label.replace(/ultra wide/i, 'uw')));
+    for (const d of back) {
+      const l = d.label;
+      if (/ultra|uw|0\.5/i.test(l)) lenses.push({ id: d.deviceId, factor: 0.5, label: '0.5×' });
+      else if (/tele|zoom|[235]x/i.test(l)) lenses.push({ id: d.deviceId, factor: /5x/i.test(l) ? 5 : /3x/i.test(l) ? 3 : 2, label: /5x/i.test(l) ? '5×' : /3x/i.test(l) ? '3×' : '2×' });
+      else if (!lenses.some((x) => x.factor === 1)) lenses.push({ id: d.deviceId, factor: 1, label: '1×' });
+    }
+    lenses.sort((a, b) => a.factor - b.factor);
+  } catch (e) {}
+  const cur = track && track.getSettings ? track.getSettings().deviceId : null;
+  const matches = lenses.filter((l) => l.id === cur);
+  lensIdx = matches.length === 1 ? lenses.indexOf(matches[0]) : Math.max(0, lenses.findIndex((l) => l.factor === 1));
+  if (lenses.length === 1) lenses = []; // one labelled lens = nothing to switch between
+}
+function renderLenses() {
+  const row = $('lenses'); row.innerHTML = '';
+  if (lenses.length) {
+    for (let i = 0; i < lenses.length; i++) { const b = document.createElement('button'); b.className = 'lens' + (i === lensIdx && zoom === 1 ? ' on' : ''); b.textContent = lenses[i].label; b.onclick = () => switchLens(i); row.appendChild(b); }
+  } else {
+    // No lens list: offer steps over the zoom range (hardware if the phone has it, else a digital crop).
+    const max = hwZoom ? Math.min(hwZoom.max, 5) : DIGITAL_MAX;
+    for (const z of [1, 2, 3].filter((z) => z <= max)) { const b = document.createElement('button'); b.className = 'lens' + (Math.abs(zoom - z) < 0.05 ? ' on' : ''); b.textContent = `${z}×`; b.onclick = () => setZoom(z); row.appendChild(b); }
+  }
+  row.hidden = row.children.length < 2;
+}
+async function switchLens(i) {
+  if (i === lensIdx && zoom === 1) return;
+  if (i === lensIdx) { await setZoom(1); return; }
+  $('shutter').disabled = true;
+  const prev = lensIdx; lensIdx = i;
+  if (!(await startStream(lenses[i].id))) { lensIdx = prev; await startStream(lenses[prev].id); }
+  renderLenses(); $('shutter').disabled = false;
+  try { tg.HapticFeedback.selectionChanged(); } catch (e) {}
+}
+async function setZoom(z) {
+  const max = hwZoom ? hwZoom.max : DIGITAL_MAX;
+  zoom = Math.max(1, Math.min(max, z));
+  if (hwZoom && track) { try { await track.applyConstraints({ advanced: [{ zoom: Math.max(hwZoom.min, zoom) }] }); video.style.transform = ''; } catch (e) { hwZoom = null; } }
+  if (!hwZoom) video.style.transform = zoom > 1 ? `scale(${zoom})` : '';
+  renderLenses();
+}
+// Pinch to zoom on the preview.
+(() => {
+  let d0 = 0, z0 = 1;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const cam = $('cam');
+  cam.addEventListener('touchstart', (e) => { if (e.touches.length === 2) { d0 = dist(e.touches); z0 = zoom; } }, { passive: true });
+  cam.addEventListener('touchmove', (e) => { if (e.touches.length === 2 && d0 && track) { e.preventDefault(); const z = z0 * dist(e.touches) / d0; if (hwZoom) { zoom = Math.max(1, Math.min(hwZoom.max, z)); track.applyConstraints({ advanced: [{ zoom: Math.max(hwZoom.min, zoom) }] }).catch(() => {}); } else { zoom = Math.max(1, Math.min(DIGITAL_MAX, z)); video.style.transform = zoom > 1 ? `scale(${zoom})` : ''; } } }, { passive: false });
+  cam.addEventListener('touchend', () => { if (d0) { d0 = 0; renderLenses(); } });
+})();
 const full = document.createElement('canvas'), small = document.createElement('canvas'), bestCanvas = document.createElement('canvas');
 async function shoot() {
   $('shutter').disabled = true; $('hint').textContent = 'Hold still…';
   const sh = $('shutter'), core = sh.innerHTML; sh.innerHTML = '<div class="wspin"></div>';
   if (!locPromise) locPromise = locationForPhoto();
   const capturedAt = new Date().toISOString();
-  const vw = video.clientWidth, vh = video.clientHeight, w = video.videoWidth, h = video.videoHeight;
+  const vw = video.clientWidth, vh = video.clientHeight, fw = video.videoWidth, fh = video.videoHeight;
+  // Digital zoom (phones without hardware zoom) = the centre crop the driver saw in the preview.
+  const dz = hwZoom ? 1 : zoom, w = Math.round(fw / dz), h = Math.round(fh / dz), sx = Math.round((fw - w) / 2), sy = Math.round((fh - h) / 2);
   // Three quick frames; keep the best so far in its own canvas (only two full frames in memory).
   // Best = sharpest within 10%, then least banding.
   const region = guideRegion(GUIDE, vw, vh, w, h);
   bestCanvas.width = w; bestCanvas.height = h;
   let best = null;
   for (let i = 0; i < 3; i++) {
-    full.width = w; full.height = h; full.getContext('2d').drawImage(video, 0, 0, w, h);
+    full.width = w; full.height = h; full.getContext('2d').drawImage(video, sx, sy, w, h, 0, 0, w, h);
     const sw = 320, shh = Math.round(h * sw / w); small.width = sw; small.height = shh;
     const c = small.getContext('2d'); c.drawImage(full, 0, 0, sw, shh);
     const g = toGray(c.getImageData(0, 0, sw, shh).data, sw, shh);
@@ -404,6 +487,7 @@ async function shoot() {
   const blob = await new Promise((r) => bestCanvas.toBlob(r, 'image/jpeg', 0.9));
   sh.innerHTML = core; closeCamera();
   pending = Object.assign(pending || {}, { blob, width: w, height: h, q: best.q, banding: best.b, captured_at: capturedAt, capture_source: 'mini_app_camera' });
+  pending.screen_mode = Object.assign(pending.screen_mode || {}, { lens: lenses[lensIdx] ? lenses[lensIdx].label : null, zoom: Math.round(zoom * 100) / 100, digital_zoom: !hwZoom && zoom > 1 });
   showReview();
 }
 // Fallback: the phone's own camera.
