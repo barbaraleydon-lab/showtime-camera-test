@@ -88,6 +88,17 @@
   .stars{font-size:30px;letter-spacing:4px;color:var(--accent)}
   .verdict{font-size:26px;font-weight:800;margin-top:6px}
   input[type=file]{display:none}
+  /* report a problem */
+  .cats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .cat{border:2px solid var(--line);background:var(--surface);border-radius:18px;padding:14px 12px;text-align:left;font-weight:700;font-size:15px;color:var(--ink);min-height:74px;display:flex;flex-direction:column;gap:4px}
+  .cat span{font-size:22px}
+  .cat small{font-weight:500;color:var(--muted);font-size:12px}
+  .cat.on{border-color:var(--accent);background:#FFF0E3}
+  .cat.urgent.on{border-color:#C8321E;background:#FDECEA}
+  textarea.note{width:100%;min-height:96px;border:1px solid var(--line);border-radius:16px;padding:12px 14px;font:inherit;font-size:16px;background:var(--surface);color:var(--ink);resize:vertical}
+  .probphoto{display:flex;align-items:center;gap:12px;margin-top:10px}
+  .probphoto img{width:72px;height:72px;object-fit:cover;border-radius:12px}
+  .linkbtn{background:none;border:0;color:#C8321E;font-weight:700;font-size:15px;padding:12px 0;width:100%}
   @media (orientation: landscape){
     .cambottom{top:0;left:auto;right:0;width:min(42vw,300px);justify-content:safe center;overflow-y:auto;padding:calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 12px 12px;gap:10px}
     .camtop{right:min(42vw,300px)}
@@ -112,7 +123,8 @@
   <p class="muted small" id="hello"></p>
   <h1>My Day</h1>
   <div id="jobs"></div>
-  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 1 Nov · 4</p>
+  <button class="linkbtn" id="reportFromDay">⚠️ Report a problem</button>
+  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 1 Nov · 5</p>
 </div></section>
 
 <section id="job" class="screen"><div class="pad bottomPad" id="jobBody"></div>
@@ -150,7 +162,21 @@
   <div class="bottomBar"><button class="btn" id="keep">Keep photo</button><button class="btn quiet" id="keepMore">Keep &amp; take another</button><button class="btn quiet" id="retake">Retake</button></div>
 </section>
 
+<section id="problem" class="screen"><div class="pad bottomPad">
+  <p class="muted small" id="probWhere" style="font-weight:700"></p>
+  <h1>Report a problem</h1>
+  <p class="muted" style="margin:0">The office is alerted straight away and replies in your Telegram chat.</p>
+  <div class="cats" id="cats"></div>
+  <h2 style="margin-top:18px">What's happening?</h2>
+  <textarea class="note" id="probText" maxlength="2000" placeholder="A few words help, e.g. Side 2 screen is black"></textarea>
+  <div class="probphoto"><img id="probImg" alt="" hidden><button class="btn quiet small" id="probAddPhoto" style="flex:1">Add a photo</button></div>
+  <p class="muted small" style="margin-top:14px">If anyone is hurt or in danger, call 112 first.</p>
+</div>
+  <div class="bottomBar"><button class="btn" id="probSend" disabled>Send to the office</button></div>
+</section>
+
 <input type="file" id="file" accept="image/*" capture="environment">
+<input type="file" id="probFile" accept="image/*">
 <div class="toast" id="toast"></div>
 
 <script>
@@ -171,14 +197,14 @@ function show(id, push = true) {
   $(id).classList.add('on'); current = id; window.scrollTo(0, 0);
   if (id === 'myday' || id === 'message') releaseCamera(); // left the job: let the camera go
   if (id !== 'cam' && id !== 'review') camFullscreen(false); // stays full screen through review, so retakes don't flicker
-  if (tg && tg.BackButton) { (id === 'job') ? tg.BackButton.show() : tg.BackButton.hide(); }
+  if (tg && tg.BackButton) { (id === 'job' || id === 'problem') ? tg.BackButton.show() : tg.BackButton.hide(); }
 }
 function back() { const prev = stack.pop() || 'myday'; show(prev, false); if (prev === 'myday') renderMyDay(); }
 if (tg && tg.BackButton) tg.BackButton.onClick(back);
 function toast(msg, ms = 3000) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), ms); }
 function message(title, body, retry) {
   $('msgTitle').textContent = title; $('msgBody').textContent = body;
-  $('msgRetry').style.display = retry ? '' : 'none'; $('msgRetry').onclick = retry || null;
+  $('msgRetry').textContent = 'Try again'; $('msgRetry').style.display = retry ? '' : 'none'; $('msgRetry').onclick = retry || null;
   show('message', false);
 }
 function haptic(kind) { try { if (!tg || !tg.HapticFeedback) return; if (kind === 'select') tg.HapticFeedback.selectionChanged(); else tg.HapticFeedback.notificationOccurred(kind); } catch (e) {} }
@@ -209,7 +235,10 @@ let data = null, job = null, loadedAt = 0;
 async function load() {
   if (!initData) { message('Open from Telegram', 'This page works inside the Showtime Driver bot in Telegram. Open the bot and tap My Day.'); return; }
   show('loading', false);
-  try { data = await api('my-day'); loadedAt = Date.now(); renderMyDay(); show('myday', false); processQueue(); }
+  try {
+    data = await api('my-day'); loadedAt = Date.now(); renderMyDay(); show('myday', false); processQueue();
+    if (new URLSearchParams(location.search).get('screen') === 'problem' && !load._opened) { load._opened = true; openProblem(null); }
+  }
   catch (e) {
     if (e.code === 'not_linked') message('Not connected yet', 'This Telegram account is not connected to a Showtime driver. Ask the office for your connection link and tap it.');
     else if (e.code === 'unauthorized') message('Open from Telegram', 'Close this page and open it again from the Showtime Driver bot.', load);
@@ -261,9 +290,11 @@ function openJob(j) {
               <button class="btn quiet small" data-save="${ci}:${ai}" style="margin-top:6px">Save to Photos</button></div>
           </div>`).join('')}` : `<h2 style="margin-top:16px">Artwork for the screen</h2><p class="muted">Artwork not approved yet. The office will send it here once it is.</p>`}
       </div>`).join('')}
+    <button class="linkbtn" id="reportFromJob">⚠️ Report a problem</button>
     <div class="card" id="photoCard"><h2>Your photos</h2><p class="muted" id="photoList">${j.photos.count ? 'Loading…' : 'No photos yet. When the screen is running, get the whole screen in with some of the activity around it.'}</p></div>`;
   $('jobBody').querySelectorAll('[data-route]').forEach((b) => b.onclick = () => openLink(job.campaigns[+b.dataset.route].route_url));
   $('jobBody').querySelectorAll('[data-save]').forEach((b) => b.onclick = () => saveArtwork(b, ...b.dataset.save.split(':').map(Number)));
+  $('reportFromJob').onclick = () => openProblem(job);
   show('job');
   prefetchArtwork(j);
   if (j.photos.count) loadPhotos();
@@ -663,6 +694,59 @@ async function keep(another = false) {
   show('job', false); loadPhotos();
   toast('Saved. Uploading…');
 }
+
+// ---------- report a problem ----------
+// Same categories and urgency as the server (desk.ts). Urgent ones ring the office's phones.
+const CATS = [
+  { id: 'screen', emoji: '🖥', label: 'Screen not working', urgent: true },
+  { id: 'breakdown', emoji: '🚨', label: 'Breakdown or accident', urgent: true },
+  { id: 'safety', emoji: '⚠️', label: 'Safety or weather', urgent: true },
+  { id: 'access', emoji: '🚧', label: "Can't get to the location" },
+  { id: 'route', emoji: '🗺', label: 'Route or traffic' },
+  { id: 'artwork', emoji: '🎞', label: 'Wrong or missing artwork' },
+  { id: 'other', emoji: '❓', label: 'Something else' },
+];
+let prob = { cat: null, ctx: null, photo: null };
+function openProblem(j) {
+  // Context: the job they were looking at, else today's job if there is one.
+  const today = data && data.jobs.find((x) => x.date === data.today);
+  const ctx = j || today || null;
+  prob = { cat: null, ctx, photo: null };
+  $('probWhere').textContent = ctx ? `${dayLabel(ctx.date, data.today)} · ${ctx.vehicle.name}` : '';
+  $('cats').innerHTML = CATS.map((c) => `<button class="cat${c.urgent ? ' urgent' : ''}" data-c="${c.id}"><span>${c.emoji}</span>${esc(c.label)}${c.urgent ? '<small>Urgent</small>' : ''}</button>`).join('');
+  $('cats').querySelectorAll('.cat').forEach((b) => b.onclick = () => { prob.cat = b.dataset.c; $('cats').querySelectorAll('.cat').forEach((x) => x.classList.toggle('on', x === b)); $('probSend').disabled = false; haptic('select'); });
+  $('probText').value = ''; $('probImg').hidden = true; $('probAddPhoto').textContent = 'Add a photo'; $('probSend').disabled = true; $('probSend').textContent = 'Send to the office';
+  show('problem');
+}
+$('reportFromDay').onclick = () => openProblem(null);
+$('probAddPhoto').onclick = () => $('probFile').click();
+$('probFile').onchange = async (ev) => {
+  const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (!f) return;
+  try {
+    // Shrink to 2048 px so it sends quickly on a weak signal.
+    const bmp = await createImageBitmap(f); const k = Math.min(1, 2048 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    prob.photo = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
+  } catch (e) { prob.photo = f.type === 'image/jpeg' ? f : null; }
+  if (prob.photo) { $('probImg').src = URL.createObjectURL(prob.photo); $('probImg').hidden = false; $('probAddPhoto').textContent = 'Change photo'; }
+};
+$('probSend').onclick = async () => {
+  if (!prob.cat) return;
+  const btn = $('probSend'); btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const r = await api('report-problem', { category: prob.cat, text: $('probText').value, has_photo: !!prob.photo, ...(prob.ctx ? { vehicle_id: prob.ctx.vehicle.id, campaign_day: prob.ctx.date } : {}) });
+    if (prob.photo && r.upload_url) {
+      try { await putWithProgress(r.upload_url, prob.photo, 'image/jpeg', () => {}); await api('problem-photo', { issue_id: r.issue_id, path: r.path }); }
+      catch (e) { toast('Problem sent, but the photo did not go. Send it in the chat instead.', 5000); }
+    }
+    haptic('success');
+    message('Sent to the office', r.acknowledgement || 'The office has been alerted and will reply in your Telegram chat.');
+    $('msgRetry').textContent = 'Back to the chat'; $('msgRetry').style.display = ''; $('msgRetry').onclick = () => { try { tg.close(); } catch (e) { show('myday', false); } };
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Send to the office';
+    toast(e.status ? (e.message || 'Could not send. Try again.') : 'No signal. Try again, or type it in the chat.', 5000);
+  }
+};
 
 // ---------- wiring ----------
 $('takePhoto').onclick = () => openCamera();
