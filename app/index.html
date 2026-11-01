@@ -50,7 +50,14 @@
   /* camera */
   #cam{background:#000;color:#fff;position:fixed;inset:0;z-index:20}
   #cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
-  #guide{position:absolute;left:7%;width:86%;top:25%;height:24%;pointer-events:none}
+  #guide{position:absolute;pointer-events:none;transition:all .2s ease}
+  #guide::after{content:'';position:absolute;inset:0;border:1px dashed rgba(255,255,255,.35);border-radius:6px}
+  .modes{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .seg{display:flex;background:rgba(0,0,0,.45);border-radius:999px;padding:3px}
+  .seg button{border:0;background:transparent;color:#fff;font-weight:700;font-size:13px;height:32px;border-radius:16px;padding:0 12px}
+  .seg button.on{background:#fff;color:#000}
+  .hint small{display:block;font-weight:500;font-size:13px;opacity:.9;margin-top:4px}
+  .hint u{cursor:pointer}
   #guide i{position:absolute;width:38px;height:38px;border:0 solid #fff}
   #guide i:nth-child(1){top:0;left:0;border-top-width:3px;border-left-width:3px;border-top-left-radius:8px}
   #guide i:nth-child(2){top:0;right:0;border-top-width:3px;border-right-width:3px;border-top-right-radius:8px}
@@ -84,6 +91,15 @@
   .stars{font-size:30px;letter-spacing:4px;color:var(--accent)}
   .verdict{font-size:26px;font-weight:800;margin-top:6px}
   input[type=file]{display:none}
+  @media (orientation: landscape){
+    .cambottom{top:0;left:auto;right:0;width:min(42vw,300px);justify-content:safe center;overflow-y:auto;padding:calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 12px 12px;gap:10px}
+    .camtop{right:min(42vw,300px)}
+    .hint{font-size:14px}
+    .hint small{font-size:12px}
+    .brands{flex-wrap:wrap;justify-content:center}
+    #shutter{width:72px;height:72px}
+    #shutter b{width:54px;height:54px}
+  }
 </style>
 </head>
 <body>
@@ -115,7 +131,11 @@
   </div>
   <div class="cambottom">
     <div class="brands" id="brands"></div>
-    <div class="hint" id="hint">Fit the whole screen inside the frame</div>
+    <div class="modes">
+      <div class="seg" id="shotSeg"><button data-shot="scene">Scene</button><button data-shot="screen">Screen</button></div>
+      <div class="seg" id="lightSeg"><button data-light="day">☀ Day</button><button data-light="night">☾ Night</button></div>
+    </div>
+    <div class="hint" id="hint">Put the screen in the box</div>
     <div class="lenses" id="lenses" hidden></div>
     <button id="shutter" aria-label="Take photo" disabled><b></b></button>
   </div>
@@ -164,7 +184,7 @@ function message(title, body, retry) {
   $('msgRetry').style.display = retry ? '' : 'none'; $('msgRetry').onclick = retry || null;
   show('message', false);
 }
-function haptic(kind) { try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(kind); } catch (e) {} }
+function haptic(kind) { try { if (!tg || !tg.HapticFeedback) return; if (kind === 'select') tg.HapticFeedback.selectionChanged(); else tg.HapticFeedback.notificationOccurred(kind); } catch (e) {} }
 
 async function api(action, body = {}) {
   const r = await fetch(`${API}?action=${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: initData, ...body }) });
@@ -315,7 +335,27 @@ function assess(g) {
   if (e.meanLuma > T.meanHigh || e.brightShare > T.brightShareOk) tips.push('Too bright. Avoid glare and direct sun behind the screen.');
   return { stars, verdict: verdictFor(stars), sharpness, exposure, tips: tips.slice(0, 3), measures: { laplacianVariance: lv, ...e } };
 }
-const GUIDE = { x: 0.07, y: 0.25, w: 0.86, h: 0.24 };
+// The guide marks where the van's screen should sit (also the area checked for banding).
+// "Scene" keeps it small so the street, people and traffic are in the shot;
+// "Screen" makes it large for a close proof shot. Shape follows the vehicle's screen.
+// Screen proportions (width / height) are assumptions until measured on the vans.
+const SCREEN_ASPECT = { digivan: 16 / 9, digicube: 1, default: 16 / 9 };
+let GUIDE = { x: 0.25, y: 0.35, w: 0.5, h: 0.16 };
+function screenAspect() { const t = String((job && job.vehicle && job.vehicle.type) || '').toLowerCase().replace(/[^a-z]/g, ''); return SCREEN_ASPECT[t] || SCREEN_ASPECT.default; }
+function layoutGuide() {
+  const cam = $('cam'); const W = cam.clientWidth || innerWidth, H = cam.clientHeight || innerHeight;
+  const land = W > H, side = land ? Math.min(W * 0.42, 300) : 0; // landscape: controls take a right-hand column
+  const aw = W - side, top = land ? 0 : 90, bottom = land ? H : H - 300, ah = Math.max(bottom - top, H * 0.4);
+  const frac = shotType === 'scene' ? (land ? 0.36 : 0.5) : (land ? 0.7 : 0.88);
+  let bw = aw * frac, bh = bw / screenAspect();
+  const maxH = ah * (shotType === 'scene' ? 0.42 : 0.8); if (bh > maxH) { bh = maxH; bw = bh * screenAspect(); }
+  const cx = aw / 2, cy = top + ah * (shotType === 'scene' ? 0.45 : 0.5);
+  const x = cx - bw / 2, y = cy - bh / 2;
+  const g = $('guide'); g.style.left = `${x}px`; g.style.top = `${y}px`; g.style.width = `${bw}px`; g.style.height = `${bh}px`;
+  GUIDE = { x: x / W, y: y / H, w: bw / W, h: bh / H };
+}
+addEventListener('resize', () => { if (current === 'cam') layoutGuide(); });
+addEventListener('orientationchange', () => setTimeout(() => { if (current === 'cam') layoutGuide(); }, 250));
 function guideRegion(g, vw, vh, pw, ph) { if (!(vw > 0 && vh > 0 && pw > 0 && ph > 0)) return g; const s = Math.max(vw / pw, vh / ph), sw = vw / (pw * s), sh = vh / (ph * s), ox = (1 - sw) / 2, oy = (1 - sh) / 2, x = clamp(ox + g.x * sw), y = clamp(oy + g.y * sh); return { x, y, w: clamp(g.w * sw, 0, 1 - x), h: clamp(g.h * sh, 0, 1 - y) }; }
 function banding({ data, width, height }, r) {
   const x0 = Math.floor(r.x * width), x1 = Math.max(x0 + 1, Math.floor((r.x + r.w) * width)), y0 = Math.floor(r.y * height), y1 = Math.max(y0 + 1, Math.floor((r.y + r.h) * height));
@@ -351,29 +391,62 @@ function getLocation(timeoutMs = 15000) {
 // ---------- camera ----------
 let stream = null, track = null, chosen = null, pending = null, locPromise = null;
 const video = $('video');
+// Shot type and day/night. Remembered on this phone; night is suggested after dark.
+let shotType = 'scene', lightMode = 'day', camCaps = {};
+try { shotType = localStorage.getItem('sd.shot') || 'scene'; } catch (e) {}
+function suggestedLight() { const d = new Date(), m = d.getMonth(), h = d.getHours(); const winter = m <= 2 || m >= 9; return (winter ? (h >= 17 || h < 8) : (h >= 21 || h < 6)) ? 'night' : 'day'; }
+function lightChoice() { try { const v = JSON.parse(localStorage.getItem('sd.light') || 'null'); if (v && Date.now() - v.at < 3 * 3600e3) return v.mode; } catch (e) {} return suggestedLight(); }
+function paintModes() {
+  document.querySelectorAll('#shotSeg button').forEach((b) => b.classList.toggle('on', b.dataset.shot === shotType));
+  document.querySelectorAll('#lightSeg button').forEach((b) => b.classList.toggle('on', b.dataset.light === lightMode));
+  layoutGuide(); paintHint();
+}
+function paintHint() {
+  const multi = job && job.campaigns.length > 1, pre = multi ? 'Tap the brand, then put' : 'Put';
+  const main = shotType === 'scene' ? `${pre} the screen in the box. Get the street and people in too.` : `${pre} the screen in the box, filling it.`;
+  let sub = '';
+  if (lightMode === 'night') sub = isIOS() || !camCaps.exposureCompensation ? 'Night: brace the phone and hold still. Screen too bright? <u id="nativeNight">Use the phone camera</u> and drag the sun down.' : 'Night: brace the phone and hold still.';
+  $('hint').innerHTML = esc(main) + (sub ? `<small>${sub}</small>` : '');
+  const n = $('nativeNight'); if (n) n.onclick = () => { releaseCamera(); $('file').click(); };
+}
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (tg && tg.platform === 'ios');
+document.querySelectorAll('#shotSeg button').forEach((b) => b.onclick = () => { shotType = b.dataset.shot; try { localStorage.setItem('sd.shot', shotType); } catch (e) {} paintModes(); haptic('select'); });
+document.querySelectorAll('#lightSeg button').forEach((b) => b.onclick = async () => { lightMode = b.dataset.light; try { localStorage.setItem('sd.light', JSON.stringify({ mode: lightMode, at: Date.now() })); } catch (e) {} paintModes(); await applyLight(); haptic('select'); });
+// Exposure for LED screens, where the phone allows it (Android). iPhones in Telegram expose none.
+// Day: exposure down 0.7 stop. Night: down 1.3 stops (the screen is far brighter than the street).
+// Both: shutter no faster than 1/50 s, so the LED refresh doesn't show as dark bands.
+async function applyLight() {
+  if (!track) return {};
+  const caps = camCaps, settings = (track.getSettings && track.getSettings()) || {}, applied = {};
+  try { if (caps.exposureCompensation) { const ev = Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, lightMode === 'night' ? -1.3 : -0.7)); await track.applyConstraints({ advanced: [{ exposureCompensation: ev }] }); applied.exposureCompensation = ev; } } catch (e) {}
+  try { if (caps.exposureMode && caps.exposureMode.includes('manual') && caps.exposureTime && settings.exposureTime && settings.exposureTime < 200) { await track.applyConstraints({ advanced: [{ exposureMode: 'manual', exposureTime: Math.min(caps.exposureTime.max, 200) }] }); applied.exposureTime = 200; } } catch (e) {}
+  if (pending && pending.screen_mode) pending.screen_mode.applied = applied;
+  return applied;
+}
 async function openCamera() {
   await fresh();
+  lightMode = lightChoice();
   locPromise = locationForPhoto(); // asked now, so any permission pop-up comes before the shutter
   show('cam', true);
   $('camchip').textContent = `${job.vehicle.name}`;
-  $('shutter').disabled = true; $('hint').textContent = 'Fit the whole screen inside the frame';
+  $('shutter').disabled = true;
   // Brand picker only when the van runs more than one campaign today.
   const cs = job.campaigns; chosen = cs.length === 1 ? { campaign: cs[0].id } : null;
   if (cs.length > 1) {
     $('brands').innerHTML = cs.map((c, i) => { const a = c.artwork[0]; return `<button class="brand" data-b="${i}">${a && (a.file_type || '').startsWith('image') ? `<img src="${esc(a.view_url)}" alt="">` : ''}${esc(c.brand || c.name)}</button>`; }).join('') + `<button class="brand on" data-b="-1">Not sure</button>`;
     $('brands').querySelectorAll('.brand').forEach((b) => b.onclick = () => { $('brands').querySelectorAll('.brand').forEach((x) => x.classList.remove('on')); b.classList.add('on'); const i = +b.dataset.b; chosen = i < 0 ? null : { campaign: cs[i].id, piece: cs[i].artwork[0] ? cs[i].artwork[0].piece_id : null }; });
-    $('hint').textContent = 'Tap the brand on the screen, then fit it in the frame';
   } else $('brands').innerHTML = '';
+  paintModes();
   clearTimeout(camIdle);
   if (stream && stream.active && track && track.readyState === 'live') {
     // Camera kept warm from the last shot: no second permission prompt.
     try { await video.play(); } catch (e) {}
-    await setZoom(1); renderLenses(); $('shutter').disabled = false; return;
+    await setZoom(1); renderLenses(); await applyLight(); paintHint(); $('shutter').disabled = false; return;
   }
   $('lenses').hidden = true; $('lenses').innerHTML = ''; zoom = 1; video.style.transform = '';
   if (!(await startStream(null))) return;
   await discoverLenses();
-  renderLenses();
+  renderLenses(); paintHint();
   $('shutter').disabled = false;
 }
 // The camera stays on between shots so the phone asks permission once per visit;
@@ -399,11 +472,8 @@ async function startStream(deviceId) {
   track = stream.getVideoTracks()[0]; video.srcObject = stream;
   await new Promise((r) => { if (video.readyState >= 2) r(); else video.onloadedmetadata = () => r(); });
   try { await video.play(); } catch (e) {}
-  // Screen mode on phones that allow it (Android): exposure a little down, shutter no faster than 1/50 s.
-  const caps = (track.getCapabilities && track.getCapabilities()) || {}; const settings = (track.getSettings && track.getSettings()) || {};
-  const applied = {};
-  try { if (caps.exposureCompensation) { const ev = Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, -0.7)); await track.applyConstraints({ advanced: [{ exposureCompensation: ev }] }); applied.exposureCompensation = ev; } } catch (e) {}
-  try { if (caps.exposureMode && caps.exposureMode.includes('manual') && caps.exposureTime && settings.exposureTime && settings.exposureTime < 200) { await track.applyConstraints({ advanced: [{ exposureMode: 'manual', exposureTime: Math.min(caps.exposureTime.max, 200) }] }); applied.exposureTime = 200; } } catch (e) {}
+  const caps = camCaps = (track.getCapabilities && track.getCapabilities()) || {};
+  const applied = await applyLight();
   // Hardware zoom range, when the phone exposes one (most Androids; iPhones on recent iOS).
   hwZoom = caps.zoom && isFinite(caps.zoom.min) && isFinite(caps.zoom.max) && caps.zoom.max > caps.zoom.min ? { min: caps.zoom.min, max: caps.zoom.max } : null;
   zoom = 1; video.style.transform = '';
@@ -487,7 +557,8 @@ async function shoot() {
   const region = guideRegion(GUIDE, vw, vh, w, h);
   bestCanvas.width = w; bestCanvas.height = h;
   let best = null;
-  for (let i = 0; i < 3; i++) {
+  const frames = lightMode === 'night' ? 5 : 3, gap = lightMode === 'night' ? 150 : 120;
+  for (let i = 0; i < frames; i++) {
     full.width = w; full.height = h; full.getContext('2d').drawImage(video, sx, sy, w, h, 0, 0, w, h);
     const sw = 320, shh = Math.round(h * sw / w); small.width = sw; small.height = shh;
     const c = small.getContext('2d'); c.drawImage(full, 0, 0, sw, shh);
@@ -495,12 +566,12 @@ async function shoot() {
     const f = { q: assess(g), b: banding(g, region) };
     const better = !best || f.q.sharpness > best.q.sharpness * 1.1 || (f.q.sharpness >= best.q.sharpness * 0.9 && f.b < best.b);
     if (better) { best = f; bestCanvas.getContext('2d').drawImage(full, 0, 0); }
-    if (i < 2) await new Promise((r) => setTimeout(r, 120));
+    if (i < frames - 1) await new Promise((r) => setTimeout(r, gap));
   }
   const blob = await new Promise((r) => bestCanvas.toBlob(r, 'image/jpeg', 0.85));
   sh.innerHTML = core; closeCamera();
   pending = Object.assign(pending || {}, { blob, width: w, height: h, q: best.q, banding: best.b, captured_at: capturedAt, capture_source: 'mini_app_camera' });
-  pending.screen_mode = Object.assign(pending.screen_mode || {}, { lens: lenses[lensIdx] ? lenses[lensIdx].label : null, zoom: Math.round(zoom * 100) / 100, digital_zoom: !hwZoom && zoom > 1 });
+  pending.screen_mode = Object.assign(pending.screen_mode || {}, { shot_type: shotType, light_mode: lightMode, frames, orientation: vw > vh ? 'landscape' : 'portrait', guide: GUIDE, lens: lenses[lensIdx] ? lenses[lensIdx].label : null, zoom: Math.round(zoom * 100) / 100, digital_zoom: !hwZoom && zoom > 1 });
   showReview();
 }
 // Fallback: the phone's own camera.
@@ -510,7 +581,7 @@ $('file').onchange = async (ev) => {
   const bmp = await createImageBitmap(f); const sw = 320, shh = Math.round(bmp.height * sw / bmp.width);
   small.width = sw; small.height = shh; const c = small.getContext('2d'); c.drawImage(bmp, 0, 0, sw, shh);
   const g = toGray(c.getImageData(0, 0, sw, shh).data, sw, shh);
-  pending = { blob: f, width: bmp.width, height: bmp.height, q: assess(g), banding: banding(g, GUIDE), captured_at: new Date().toISOString(), capture_source: 'phone_camera', screen_mode: { applied: {}, fallback: true } };
+  pending = { blob: f, width: bmp.width, height: bmp.height, q: assess(g), banding: banding(g, GUIDE), captured_at: new Date().toISOString(), capture_source: 'phone_camera', screen_mode: { applied: {}, fallback: true, shot_type: shotType, light_mode: lightMode } };
   showReview();
 };
 function showReview() {
