@@ -101,6 +101,28 @@
   .probbtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:18px;min-height:56px;padding:14px 18px;border:2px solid #C8321E;border-radius:18px;background:#FDECEA;color:#C8321E;font:inherit;font-weight:800;font-size:17px;-webkit-tap-highlight-color:transparent}
   .probbtn:active{background:#C8321E;color:#fff}
   .probbtn span{font-size:20px}
+  /* availability */
+  .monthnav{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px}
+  .monthnav button{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font:800 20px/1 Inter,system-ui;color:var(--ink)}
+  .monthnav button:disabled{opacity:.3}
+  .monthnav b{font-size:18px}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:12px}
+  .cal .dow{font-size:11px;font-weight:800;color:var(--muted);text-align:center;letter-spacing:.5px;padding-bottom:2px}
+  .cal button{aspect-ratio:1;border:1px solid var(--line);background:var(--surface);border-radius:12px;font:700 16px/1 Inter,system-ui;color:var(--ink);padding:0;position:relative}
+  .cal button.off{background:#FDECEA;border:2px solid #C8321E;color:#C8321E}
+  .cal button.off::after{content:'✕';position:absolute;right:4px;top:3px;font-size:10px}
+  .cal button.office{border-style:dashed}
+  .cal button:disabled{opacity:.35}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:13px;color:var(--muted)}
+  .legend i{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:6px;border:1px solid var(--line);background:var(--surface)}
+  .legend i.off{background:#FDECEA;border:2px solid #C8321E}
+  .availbtn{margin-top:10px}
+  .daypick{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+  .daypick button{text-align:left;border:2px solid var(--line);background:var(--surface);border-radius:16px;padding:12px 14px;font:700 15px/1.3 Inter,system-ui;color:var(--ink)}
+  .daypick button small{display:block;font-weight:500;color:var(--muted);font-size:13px;margin-top:2px}
+  .daypick button.on{border-color:var(--accent);background:#FFF0E3}
+  .daypick button:disabled{opacity:.5}
+  .callbtn{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;min-height:48px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:800;text-decoration:none}
   @media (orientation: landscape){
     .cambottom{top:0;left:auto;right:0;width:min(42vw,300px);justify-content:safe center;overflow-y:auto;padding:calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 12px 12px;gap:10px}
     .camtop{right:min(42vw,300px)}
@@ -126,7 +148,8 @@
   <h1>My Day</h1>
   <div id="jobs"></div>
   <button class="probbtn" id="reportFromDay"><span>⚠️</span>Report a problem</button>
-  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 1 Nov · 6</p>
+  <button class="btn quiet small availbtn" id="availFromDay">📅 My availability</button>
+  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 1 Nov · 7</p>
 </div></section>
 
 <section id="job" class="screen"><div class="pad bottomPad" id="jobBody"></div>
@@ -169,12 +192,29 @@
   <h1>Report a problem</h1>
   <p class="muted" style="margin:0">The office is alerted straight away and replies in your Telegram chat.</p>
   <div class="cats" id="cats"></div>
+  <div id="probDays" hidden>
+    <h2 style="margin-top:18px">Which day can't you do?</h2>
+    <div class="daypick" id="dayPick"></div>
+    <p class="muted small" id="dayNote"></p>
+  </div>
   <h2 style="margin-top:18px">What's happening?</h2>
   <textarea class="note" id="probText" maxlength="2000" placeholder="A few words help, e.g. Side 2 screen is black"></textarea>
   <div class="probphoto"><img id="probImg" alt="" hidden><button class="btn quiet small" id="probAddPhoto" style="flex:1">Add a photo</button></div>
   <p class="muted small" style="margin-top:14px">If anyone is hurt or in danger, call 112 first.</p>
 </div>
   <div class="bottomBar"><button class="btn" id="probSend" disabled>Send to the office</button></div>
+</section>
+
+<section id="avail" class="screen"><div class="pad bottomPad">
+  <p class="muted small" style="font-weight:700">Your availability</p>
+  <h1>Days you can't work</h1>
+  <p class="muted" style="margin:0">Tap each day you <b>can't</b> work. Leave the rest. The office only books you on days you're free.</p>
+  <div class="monthnav"><button id="availPrev" aria-label="Previous month">‹</button><b id="availMonth"></b><button id="availNext" aria-label="Next month">›</button></div>
+  <div class="cal" id="cal"></div>
+  <div class="legend"><span><i></i>Free</span><span><i class="off"></i>Can't work</span></div>
+  <p class="muted small" id="availNote"></p>
+</div>
+  <div class="bottomBar"><button class="btn" id="availSend" disabled>Send</button></div>
 </section>
 
 <input type="file" id="file" accept="image/*" capture="environment">
@@ -199,7 +239,7 @@ function show(id, push = true) {
   $(id).classList.add('on'); current = id; window.scrollTo(0, 0);
   if (id === 'myday' || id === 'message') releaseCamera(); // left the job: let the camera go
   if (id !== 'cam' && id !== 'review') camFullscreen(false); // stays full screen through review, so retakes don't flicker
-  if (tg && tg.BackButton) { (id === 'job' || id === 'problem') ? tg.BackButton.show() : tg.BackButton.hide(); }
+  if (tg && tg.BackButton) { (id === 'job' || id === 'problem' || id === 'avail') ? tg.BackButton.show() : tg.BackButton.hide(); }
 }
 function back() { const prev = stack.pop() || 'myday'; show(prev, false); if (prev === 'myday') renderMyDay(); }
 if (tg && tg.BackButton) tg.BackButton.onClick(back);
@@ -239,7 +279,9 @@ async function load() {
   show('loading', false);
   try {
     data = await api('my-day'); loadedAt = Date.now(); renderMyDay(); show('myday', false); processQueue();
-    if (new URLSearchParams(location.search).get('screen') === 'problem' && !load._opened) { load._opened = true; openProblem(null); }
+    const q = new URLSearchParams(location.search);
+    if (!load._opened && q.get('screen') === 'problem') { load._opened = true; openProblem(null); }
+    if (!load._opened && q.get('screen') === 'availability') { load._opened = true; openAvailability(q.get('month')); }
   }
   catch (e) {
     if (e.code === 'not_linked') message('Not connected yet', 'This Telegram account is not connected to a Showtime driver. Ask the office for your connection link and tap it.');
@@ -369,9 +411,10 @@ function assess(g) {
 // "Scene" keeps it small so the street, people and traffic are in the shot;
 // "Screen" makes it large for a close proof shot. Shape follows the vehicle's screen.
 // Screen proportions (width / height) are assumptions until measured on the vans.
-const SCREEN_ASPECT = { digivan: 16 / 9, digicube: 1, default: 16 / 9 };
+// Every van is framed as a DigiVan screen (16:9); the box is only a guide.
+const SCREEN_ASPECT = 16 / 9;
 let GUIDE = { x: 0.25, y: 0.35, w: 0.5, h: 0.16 };
-function screenAspect() { const t = String((job && job.vehicle && job.vehicle.type) || '').toLowerCase().replace(/[^a-z]/g, ''); return SCREEN_ASPECT[t] || SCREEN_ASPECT.default; }
+function screenAspect() { return SCREEN_ASPECT; }
 function layoutGuide() {
   const cam = $('cam'); const W = cam.clientWidth || innerWidth, H = cam.clientHeight || innerHeight;
   const land = W > H, side = land ? Math.min(W * 0.42, 300) : 0; // landscape: controls take a right-hand column
@@ -706,17 +749,37 @@ const CATS = [
   { id: 'access', emoji: '🚧', label: "Can't get to the location" },
   { id: 'route', emoji: '🗺', label: 'Route or traffic' },
   { id: 'artwork', emoji: '🎞', label: 'Wrong or missing artwork' },
+  { id: 'availability', emoji: '📅', label: "Can't do a booked day" },
   { id: 'other', emoji: '❓', label: 'Something else' },
 ];
-let prob = { cat: null, ctx: null, photo: null };
+let prob = { cat: null, ctx: null, photo: null, day: null };
+let bookings = null; // upcoming-bookings, loaded the first time "Can't do a booked day" is picked
+const canSend = () => !!prob.cat && (prob.cat !== 'availability' || !!prob.day);
+async function showDays() {
+  $('probDays').hidden = false; $('dayNote').textContent = '';
+  if (!bookings) {
+    $('dayPick').innerHTML = '<div class="spin" style="margin:12px auto"></div>';
+    try { bookings = await api('upcoming-bookings'); } catch (e) { $('dayPick').innerHTML = ''; $('dayNote').textContent = 'Could not load your bookings. Check your signal and try again.'; return; }
+  }
+  const b = bookings, c = b.contact || {};
+  const call = c.phone ? `<a class="callbtn" href="tel:${esc(String(c.phone).replace(/\s+/g, ''))}">📞 Call ${esc(c.name || 'the office')}</a>` : '';
+  if (!b.bookings.length) { $('dayPick').innerHTML = ''; $('dayNote').innerHTML = 'You have no bookings coming up.'; return; }
+  $('dayPick').innerHTML = b.bookings.map((x, i) => `<button data-i="${i}" ${x.can_give_up ? '' : 'disabled'} class="${prob.day && prob.day.date === x.date && prob.day.vehicle_id === x.vehicle_id ? 'on' : ''}">${esc(dayLabel(x.date, b.today))} · ${esc(x.vehicle)}<small>${esc(x.campaigns.join(', '))}${x.can_give_up ? '' : ` · less than ${b.min_days} days away`}</small></button>`).join('');
+  $('dayPick').querySelectorAll('button[data-i]').forEach((btn) => btn.onclick = () => { prob.day = b.bookings[Number(btn.dataset.i)]; showDays(); $('probSend').disabled = !canSend(); haptic('select'); });
+  if (b.bookings.some((x) => !x.can_give_up)) $('dayNote').innerHTML = `For a day less than ${b.min_days} days away, please phone ${esc(c.name || 'the office')}${c.phone ? ` on ${esc(c.phone)}` : ''}.${call}`;
+}
 function openProblem(j) {
   // Context: the job they were looking at, else today's job if there is one.
   const today = data && data.jobs.find((x) => x.date === data.today);
   const ctx = j || today || null;
-  prob = { cat: null, ctx, photo: null };
+  prob = { cat: null, ctx, photo: null, day: null }; bookings = null; $('probDays').hidden = true;
   $('probWhere').textContent = ctx ? `${dayLabel(ctx.date, data.today)} · ${ctx.vehicle.name}` : '';
   $('cats').innerHTML = CATS.map((c) => `<button class="cat${c.urgent ? ' urgent' : ''}" data-c="${c.id}"><span>${c.emoji}</span>${esc(c.label)}${c.urgent ? '<small>Urgent</small>' : ''}</button>`).join('');
-  $('cats').querySelectorAll('.cat').forEach((b) => b.onclick = () => { prob.cat = b.dataset.c; $('cats').querySelectorAll('.cat').forEach((x) => x.classList.toggle('on', x === b)); $('probSend').disabled = false; haptic('select'); });
+  $('cats').querySelectorAll('.cat').forEach((b) => b.onclick = () => {
+    prob.cat = b.dataset.c; $('cats').querySelectorAll('.cat').forEach((x) => x.classList.toggle('on', x === b));
+    if (prob.cat === 'availability') { $('probText').placeholder = 'Why? e.g. family event'; showDays(); } else { $('probText').placeholder = 'A few words help, e.g. Side 2 screen is black'; $('probDays').hidden = true; prob.day = null; }
+    $('probSend').disabled = !canSend(); haptic('select');
+  });
   $('probText').value = ''; $('probImg').hidden = true; $('probAddPhoto').textContent = 'Add a photo'; $('probSend').disabled = true; $('probSend').textContent = 'Send to the office';
   show('problem');
 }
@@ -733,10 +796,10 @@ $('probFile').onchange = async (ev) => {
   if (prob.photo) { $('probImg').src = URL.createObjectURL(prob.photo); $('probImg').hidden = false; $('probAddPhoto').textContent = 'Change photo'; }
 };
 $('probSend').onclick = async () => {
-  if (!prob.cat) return;
+  if (!canSend()) return;
   const btn = $('probSend'); btn.disabled = true; btn.textContent = 'Sending…';
   try {
-    const r = await api('report-problem', { category: prob.cat, text: $('probText').value, has_photo: !!prob.photo, ...(prob.ctx ? { vehicle_id: prob.ctx.vehicle.id, campaign_day: prob.ctx.date } : {}) });
+    const r = await api('report-problem', { category: prob.cat, text: $('probText').value, has_photo: !!prob.photo, ...(prob.cat === 'availability' && prob.day ? { vehicle_id: prob.day.vehicle_id, campaign_day: prob.day.date } : prob.ctx ? { vehicle_id: prob.ctx.vehicle.id, campaign_day: prob.ctx.date } : {}) });
     if (prob.photo && r.upload_url) {
       try { await putWithProgress(r.upload_url, prob.photo, 'image/jpeg', () => {}); await api('problem-photo', { issue_id: r.issue_id, path: r.path }); }
       catch (e) { toast('Problem sent, but the photo did not go. Send it in the chat instead.', 5000); }
@@ -747,6 +810,75 @@ $('probSend').onclick = async () => {
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Send to the office';
     toast(e.status ? (e.message || 'Could not send. Try again.') : 'No signal. Try again, or type it in the chat.', 5000);
+  }
+};
+
+// ---------- availability ----------
+// One month at a time: this month and the next two. Days the office entered show
+// dashed and can't be changed here. Past days can't be changed.
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+let av = null; // { month:'YYYY-MM', today, mine:Set, office:Set, answered, min, max, dirty }
+const monthAdd = (m, n) => { const [y, mo] = m.split('-').map(Number); const d = new Date(Date.UTC(y, mo - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+const monthName = (m) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
+async function openAvailability(month) {
+  const today = (data && data.today) || new Date().toISOString().slice(0, 10);
+  const min = today.slice(0, 7), max = monthAdd(min, 2);
+  const m = /^\d{4}-\d{2}$/.test(month || '') && month >= min && month <= max ? month : monthAdd(min, 1);
+  show('avail');
+  await loadMonth(m, min, max);
+}
+async function loadMonth(m, min, max) {
+  $('availMonth').textContent = monthName(m); $('cal').innerHTML = '<div class="spin" style="grid-column:1/-1;margin:24px auto"></div>';
+  $('availSend').disabled = true; $('availNote').textContent = '';
+  try {
+    const r = await api('availability-get', { month: m });
+    av = { month: m, today: r.today, min, max, mine: new Set(r.days.filter((d) => d.source === 'driver').map((d) => d.day)), office: new Set(r.days.filter((d) => d.source !== 'driver').map((d) => d.day)), answered: r.answered_at, dirty: false };
+    renderMonth();
+  } catch (e) { $('cal').innerHTML = ''; $('availNote').textContent = e.status ? (e.message || 'Could not load this month.') : 'No signal. Try again in a moment.'; }
+}
+function renderMonth() {
+  const [y, mo] = av.month.split('-').map(Number);
+  const first = new Date(Date.UTC(y, mo - 1, 1)), days = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  const lead = (first.getUTCDay() + 6) % 7; // Monday first
+  let h = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<div class="dow">${d}</div>`).join('');
+  for (let i = 0; i < lead; i++) h += '<div></div>';
+  for (let d = 1; d <= days; d++) {
+    const iso = `${av.month}-${String(d).padStart(2, '0')}`;
+    const office = av.office.has(iso), off = office || av.mine.has(iso), past = iso < av.today;
+    h += `<button data-d="${iso}" class="${off ? 'off' : ''}${office ? ' office' : ''}" ${past || office ? 'disabled' : ''} aria-pressed="${off}" aria-label="${d} ${MONTHS[mo - 1]}${off ? ", can't work" : ''}">${d}</button>`;
+  }
+  $('cal').innerHTML = h;
+  $('cal').querySelectorAll('button[data-d]').forEach((b) => b.onclick = () => { const d = b.dataset.d; av.mine.has(d) ? av.mine.delete(d) : av.mine.add(d); av.dirty = true; haptic('select'); renderMonth(); });
+  $('availPrev').disabled = av.month <= av.min; $('availNext').disabled = av.month >= av.max;
+  const n = [...av.mine].filter((d) => d >= av.today).length;
+  $('availSend').disabled = false;
+  $('availSend').textContent = n ? `Send · ${n} day${n === 1 ? '' : 's'} off` : 'I can work every day';
+  const notes = [];
+  if (av.office.size) notes.push('Dashed days were entered by the office. Ask them to change those.');
+  if (av.answered && !av.dirty) notes.push(`You already sent ${MONTHS[mo - 1]}. Change it and send again any time.`);
+  $('availNote').textContent = notes.join(' ');
+}
+// Telegram's own confirm where it has one (window.confirm is blocked in some Telegram apps).
+const askConfirm = (msg) => new Promise((res) => { if (tg && tg.showConfirm) { try { tg.showConfirm(msg, (ok) => res(!!ok)); return; } catch (e) {} } res(window.confirm(msg)); });
+async function goMonth(step) {
+  if (!av) return;
+  if (av.dirty && !(await askConfirm('Leave this month without sending it?'))) return;
+  await loadMonth(monthAdd(av.month, step), av.min, av.max);
+}
+$('availPrev').onclick = () => goMonth(-1);
+$('availNext').onclick = () => goMonth(1);
+$('availFromDay').onclick = () => openAvailability(null);
+$('availSend').onclick = async () => {
+  if (!av) return;
+  const btn = $('availSend'); btn.disabled = true; const label = btn.textContent; btn.textContent = 'Sending…';
+  try {
+    const r = await api('availability-save', { month: av.month, days: [...av.mine].filter((d) => d >= av.today).sort() });
+    av.dirty = false; av.answered = new Date().toISOString(); haptic('success');
+    message('Thanks, that\'s saved', r.message || 'The office has your availability.');
+    $('msgRetry').textContent = 'Back to the chat'; $('msgRetry').style.display = ''; $('msgRetry').onclick = () => { try { tg.close(); } catch (e) { show('myday', false); } };
+  } catch (e) {
+    btn.disabled = false; btn.textContent = label;
+    toast(e.status ? (e.message || 'Could not send. Try again.') : 'No signal. Try again in a moment.', 5000);
   }
 };
 
