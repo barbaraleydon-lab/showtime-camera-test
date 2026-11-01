@@ -153,6 +153,7 @@ function show(id, push = true) {
   if (push && current && current !== id && !['loading', 'message', 'cam', 'review'].includes(current)) stack.push(current);
   document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'));
   $(id).classList.add('on'); current = id; window.scrollTo(0, 0);
+  if (id === 'myday' || id === 'message') releaseCamera(); // left the job: let the camera go
   if (tg && tg.BackButton) { (id === 'job') ? tg.BackButton.show() : tg.BackButton.hide(); }
 }
 function back() { const prev = stack.pop() || 'myday'; show(prev, false); if (prev === 'myday') renderMyDay(); }
@@ -256,7 +257,7 @@ async function loadPhotos() {
   try {
     const r = await api('photos', { vehicle_id: job.vehicle.id, campaign_day: job.date });
     const pending = (await queueAll()).filter((q) => q.vehicle_id === job.vehicle.id && q.campaign_day === job.date && q.state !== 'done').length;
-    $('photoList').innerHTML = (pending ? `<p><b>${pending} waiting to upload</b>. Keep this page open with signal.</p>` : '') +
+    $('photoList').innerHTML = (pending ? `<p><b>${pending} waiting to upload</b> — <span id="uploadLine">${uploadNow ? `Uploading… ${uploadNow.pct}%` : 'waiting for signal'}</span>. Keep this page open.</p>` : '') +
       (r.photos.length ? r.photos.map((p) => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)"><span>${new Date(p.captured_at).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' })}${p.stars ? ` · approx. ${p.stars}★` : ''}</span><span class="muted small">${esc(STATUS[p.status] || p.status)}</span></div>`).join('') : '');
   } catch (e) { $('photoList').textContent = 'Could not load your photos.'; }
 }
@@ -363,16 +364,27 @@ async function openCamera() {
     $('brands').querySelectorAll('.brand').forEach((b) => b.onclick = () => { $('brands').querySelectorAll('.brand').forEach((x) => x.classList.remove('on')); b.classList.add('on'); const i = +b.dataset.b; chosen = i < 0 ? null : { campaign: cs[i].id, piece: cs[i].artwork[0] ? cs[i].artwork[0].piece_id : null }; });
     $('hint').textContent = 'Tap the brand on the screen, then fit it in the frame';
   } else $('brands').innerHTML = '';
+  clearTimeout(camIdle);
+  if (stream && stream.active && track && track.readyState === 'live') {
+    // Camera kept warm from the last shot: no second permission prompt.
+    try { await video.play(); } catch (e) {}
+    await setZoom(1); renderLenses(); $('shutter').disabled = false; return;
+  }
   $('lenses').hidden = true; $('lenses').innerHTML = ''; zoom = 1; video.style.transform = '';
   if (!(await startStream(null))) return;
   await discoverLenses();
   renderLenses();
   $('shutter').disabled = false;
 }
+// The camera stays on between shots so the phone asks permission once per visit;
+// it is released when the driver leaves the job, the app goes to the background,
+// or nothing happens for two minutes.
+let camIdle = null;
+function parkCamera() { clearTimeout(camIdle); camIdle = setTimeout(releaseCamera, 120000); }
 
 // Start (or restart) the rear camera. deviceId null = whatever the phone picks as "environment".
 async function startStream(deviceId) {
-  closeCamera();
+  releaseCamera();
   const videoC = { width: { ideal: 4096 }, height: { ideal: 3072 } };
   if (deviceId) videoC.deviceId = { exact: deviceId }; else videoC.facingMode = { ideal: 'environment' };
   try {
@@ -381,7 +393,7 @@ async function startStream(deviceId) {
     if (deviceId) return false; // lens switch failed; caller keeps the old lens
     $('camchip').textContent = 'Camera unavailable';
     $('hint').innerHTML = (e && e.name === 'NotAllowedError' ? 'Camera permission was refused.' : 'The camera could not start.') + ' <u id="useNative">Use the phone camera instead</u>';
-    $('useNative').onclick = () => { closeCamera(); $('file').click(); };
+    $('useNative').onclick = () => { releaseCamera(); $('file').click(); };
     return false;
   }
   track = stream.getVideoTracks()[0]; video.srcObject = stream;
@@ -398,7 +410,8 @@ async function startStream(deviceId) {
   pending = { screen_mode: { applied, exposure_control: !!caps.exposureMode, shutter_control: !!caps.exposureTime, hardware_zoom: !!hwZoom } };
   return true;
 }
-function closeCamera() { if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; track = null; } }
+function releaseCamera() { clearTimeout(camIdle); if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; track = null; } }
+function closeCamera() { parkCamera(); }
 
 // ---------- lenses and zoom ----------
 // Wide angle comes from the phone's ultra-wide lens, which is a separate camera device.
@@ -484,7 +497,7 @@ async function shoot() {
     if (better) { best = f; bestCanvas.getContext('2d').drawImage(full, 0, 0); }
     if (i < 2) await new Promise((r) => setTimeout(r, 120));
   }
-  const blob = await new Promise((r) => bestCanvas.toBlob(r, 'image/jpeg', 0.9));
+  const blob = await new Promise((r) => bestCanvas.toBlob(r, 'image/jpeg', 0.85));
   sh.innerHTML = core; closeCamera();
   pending = Object.assign(pending || {}, { blob, width: w, height: h, q: best.q, banding: best.b, captured_at: capturedAt, capture_source: 'mini_app_camera' });
   pending.screen_mode = Object.assign(pending.screen_mode || {}, { lens: lenses[lensIdx] ? lenses[lensIdx].label : null, zoom: Math.round(zoom * 100) / 100, digital_zoom: !hwZoom && zoom > 1 });
@@ -520,7 +533,19 @@ const queueDel = (id) => tx('readwrite', (s) => s.delete(id));
 const queueAll = () => tx('readonly', (s) => s.getAll()).catch(() => []);
 async function sha256(blob) { try { const d = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()); return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join(''); } catch (e) { return null; } }
 
-let processing = false;
+let processing = false, uploadNow = null;
+// PUT via XHR: gives upload progress and a hard timeout (fetch has neither).
+function putWithProgress(url, blob, mime, onProgress) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest(); x.open('PUT', url); x.timeout = 120000;
+    x.setRequestHeader('Content-Type', mime); x.setRequestHeader('x-upsert', 'false');
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round(100 * e.loaded / e.total)); };
+    x.onload = () => (x.status < 300 || x.status === 409) ? res() : rej(new Error(`upload ${x.status}`));
+    x.onerror = () => rej(new Error('upload network error')); x.ontimeout = () => rej(new Error('upload timed out'));
+    x.send(blob);
+  });
+}
+function paintProgress() { const el = $('uploadLine'); if (el && uploadNow) el.textContent = `Uploading… ${uploadNow.pct}%`; }
 async function processQueue() {
   if (processing) return; processing = true;
   try {
@@ -531,20 +556,24 @@ async function processQueue() {
           item.evidence_id = r.evidence_id; item.upload_url = r.upload_url; await queuePut(item);
         }
         if (!item.uploaded) {
-          const put = await fetch(item.upload_url, { method: 'PUT', headers: { 'Content-Type': item.meta.mime_type, 'x-upsert': 'false' }, body: item.blob });
-          if (!put.ok && put.status !== 409) throw new Error(`upload ${put.status}`);
+          await putWithProgress(item.upload_url, item.blob, item.meta.mime_type, (pct) => { uploadNow = { id: item.id, pct }; paintProgress(); });
           item.uploaded = true; await queuePut(item);
         }
+        uploadNow = null;
         await api('upload-complete', { evidence_id: item.evidence_id, sha256: item.sha256 });
         await queueDel(item.id);
         toast('Photo uploaded. Waiting for the office.'); haptic('success');
       } catch (e) {
+        uploadNow = null;
         if (e.code === 'not_assigned' || e.status === 400) { await queueDel(item.id); toast('A photo could not be filed to this job and was removed.'); }
-        // otherwise leave it queued; next open or next photo retries
+        // otherwise leave it queued; retried in a minute, on the next photo, or on the next open
+        else retrySoon();
       }
     }
   } finally { processing = false; if (current === 'job' && job) loadPhotos(); }
 }
+let retryTimer = null;
+function retrySoon() { clearTimeout(retryTimer); retryTimer = setTimeout(() => { retryTimer = null; if (navigator.onLine !== false) processQueue(); }, 60000); }
 async function keep(another = false) {
   $('keep').disabled = true; $('keepMore').disabled = true;
   const loc = await (locPromise || Promise.resolve({ gps_status: 'unknown' }));
@@ -578,7 +607,8 @@ $('shutter').onclick = () => shoot();
 $('keep').onclick = () => keep(false);
 $('keepMore').onclick = () => keep(true);
 $('retake').onclick = () => { pending = null; openCamera(); };
-document.addEventListener('visibilitychange', () => { if (document.hidden) closeCamera(); else processQueue(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseCamera(); else processQueue(); });
+window.addEventListener('pagehide', releaseCamera);
 window.addEventListener('online', () => processQueue());
 load();
 })();
