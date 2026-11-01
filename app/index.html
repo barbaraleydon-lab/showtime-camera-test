@@ -68,10 +68,6 @@
   .camchip{min-height:40px;padding:0 14px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font-weight:600;font-size:14px;display:flex;align-items:center;max-width:64%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .cambottom{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;gap:14px;padding:16px 16px calc(28px + env(safe-area-inset-bottom));background:rgba(0,0,0,.4)}
   .hint{font-weight:600;font-size:15px;text-shadow:0 0 6px rgba(0,0,0,.6);text-align:center}
-  .brands{display:flex;gap:8px;overflow-x:auto;max-width:100%;padding:2px}
-  .brand{flex:none;border:2px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45);color:#fff;border-radius:14px;padding:6px 10px;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px}
-  .brand img{width:44px;height:28px;object-fit:cover;border-radius:6px}
-  .brand.on{border-color:var(--accent);background:rgba(255,90,0,.25)}
   .lenses{display:flex;gap:6px;background:rgba(0,0,0,.45);border-radius:999px;padding:4px}
   .lens{border:0;background:transparent;color:#fff;font-weight:700;font-size:13px;min-width:44px;height:34px;border-radius:17px;padding:0 10px}
   .lens.on{background:#fff;color:#000}
@@ -98,7 +94,6 @@
     .hint{font-size:13px}
     .hint small{font-size:12px}
     .camchip{display:none}
-    .brands{flex-wrap:wrap;justify-content:center}
     #shutter{width:72px;height:72px}
     #shutter b{width:54px;height:54px}
   }
@@ -132,7 +127,6 @@
     <div style="width:48px"></div>
   </div>
   <div class="cambottom">
-    <div class="brands" id="brands"></div>
     <div class="modes">
       <div class="seg" id="lightSeg"><button data-light="day">☀ Day</button><button data-light="night">☾ Night</button></div>
     </div>
@@ -433,12 +427,8 @@ async function openCamera() {
   show('cam', true);
   $('camchip').textContent = `${job.vehicle.name}`;
   $('shutter').disabled = true;
-  // Brand picker only when the van runs more than one campaign today.
+  // No brand picker: on a multi-brand van-day, Media Studio sorts the photos by brand.
   const cs = job.campaigns; chosen = cs.length === 1 ? { campaign: cs[0].id } : null;
-  if (cs.length > 1) {
-    $('brands').innerHTML = cs.map((c, i) => { const a = c.artwork[0]; return `<button class="brand" data-b="${i}">${a && (a.file_type || '').startsWith('image') ? `<img src="${esc(a.view_url)}" alt="">` : ''}${esc(c.brand || c.name)}</button>`; }).join('') + `<button class="brand on" data-b="-1">Not sure</button>`;
-    $('brands').querySelectorAll('.brand').forEach((b) => b.onclick = () => { $('brands').querySelectorAll('.brand').forEach((x) => x.classList.remove('on')); b.classList.add('on'); const i = +b.dataset.b; chosen = i < 0 ? null : { campaign: cs[i].id, piece: cs[i].artwork[0] ? cs[i].artwork[0].piece_id : null }; });
-  } else $('brands').innerHTML = '';
   paintModes();
   clearTimeout(camIdle);
   if (stream && stream.active && track && track.readyState === 'live') {
@@ -592,8 +582,7 @@ function showReview() {
   $('shot').src = URL.createObjectURL(pending.blob);
   $('stars').textContent = '★'.repeat(Math.floor(q.stars)) + (q.stars % 1 ? '½' : '') + '☆'.repeat(5 - Math.ceil(q.stars));
   $('verdict').textContent = q.verdict;
-  const brand = chosen && job.campaigns.find((c) => c.id === chosen.campaign);
-  $('reviewSub').textContent = `Photo quality (approx.)${brand && job.campaigns.length > 1 ? ` · ${brand.brand || brand.name}` : ''}`;
+  $('reviewSub').textContent = 'Photo quality (approx.)';
   $('tips').innerHTML = q.tips.length ? q.tips.map((t) => `<p>${esc(t)}</p>`).join('') : '<p>Looks fine on sharpness and light.</p>';
   show('review', false);
 }
