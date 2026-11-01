@@ -98,7 +98,9 @@
   textarea.note{width:100%;min-height:96px;border:1px solid var(--line);border-radius:16px;padding:12px 14px;font:inherit;font-size:16px;background:var(--surface);color:var(--ink);resize:vertical}
   .probphoto{display:flex;align-items:center;gap:12px;margin-top:10px}
   .probphoto img{width:72px;height:72px;object-fit:cover;border-radius:12px}
-  .linkbtn{background:none;border:0;color:#C8321E;font-weight:700;font-size:15px;padding:12px 0;width:100%}
+  .probbtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:18px;min-height:56px;padding:14px 18px;border:2px solid #C8321E;border-radius:18px;background:#FDECEA;color:#C8321E;font:inherit;font-weight:800;font-size:17px;-webkit-tap-highlight-color:transparent}
+  .probbtn:active{background:#C8321E;color:#fff}
+  .probbtn span{font-size:20px}
   @media (orientation: landscape){
     .cambottom{top:0;left:auto;right:0;width:min(42vw,300px);justify-content:safe center;overflow-y:auto;padding:calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 12px 12px;gap:10px}
     .camtop{right:min(42vw,300px)}
@@ -123,8 +125,8 @@
   <p class="muted small" id="hello"></p>
   <h1>My Day</h1>
   <div id="jobs"></div>
-  <button class="linkbtn" id="reportFromDay">⚠️ Report a problem</button>
-  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 1 Nov · 5</p>
+  <button class="probbtn" id="reportFromDay"><span>⚠️</span>Report a problem</button>
+  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 1 Nov · 6</p>
 </div></section>
 
 <section id="job" class="screen"><div class="pad bottomPad" id="jobBody"></div>
@@ -290,7 +292,7 @@ function openJob(j) {
               <button class="btn quiet small" data-save="${ci}:${ai}" style="margin-top:6px">Save to Photos</button></div>
           </div>`).join('')}` : `<h2 style="margin-top:16px">Artwork for the screen</h2><p class="muted">Artwork not approved yet. The office will send it here once it is.</p>`}
       </div>`).join('')}
-    <button class="linkbtn" id="reportFromJob">⚠️ Report a problem</button>
+    <button class="probbtn" id="reportFromJob"><span>⚠️</span>Report a problem</button>
     <div class="card" id="photoCard"><h2>Your photos</h2><p class="muted" id="photoList">${j.photos.count ? 'Loading…' : 'No photos yet. When the screen is running, get the whole screen in with some of the activity around it.'}</p></div>`;
   $('jobBody').querySelectorAll('[data-route]').forEach((b) => b.onclick = () => openLink(job.campaigns[+b.dataset.route].route_url));
   $('jobBody').querySelectorAll('[data-save]').forEach((b) => b.onclick = () => saveArtwork(b, ...b.dataset.save.split(':').map(Number)));
