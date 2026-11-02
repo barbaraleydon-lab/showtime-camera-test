@@ -117,6 +117,7 @@
   .legend i{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:6px;border:1px solid var(--line);background:var(--surface)}
   .legend i.off{background:#FDECEA;border:2px solid #C8321E}
   .availbtn{margin-top:10px}
+  .parking{margin-top:12px;padding:12px 14px;border-radius:16px;background:#EEF4FF;border:1px solid #C9DAF8}
   .daypick{display:flex;flex-direction:column;gap:8px;margin-top:10px}
   .daypick button{text-align:left;border:2px solid var(--line);background:var(--surface);border-radius:16px;padding:12px 14px;font:700 15px/1.3 Inter,system-ui;color:var(--ink)}
   .daypick button small{display:block;font-weight:500;color:var(--muted);font-size:13px;margin-top:2px}
@@ -149,7 +150,7 @@
   <div id="jobs"></div>
   <button class="probbtn" id="reportFromDay"><span>⚠️</span>Report a problem</button>
   <button class="btn quiet small availbtn" id="availFromDay">📅 My availability</button>
-  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 1 Nov · 7</p>
+  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 2 Nov · 1</p>
 </div></section>
 
 <section id="job" class="screen"><div class="pad bottomPad" id="jobBody"></div>
@@ -325,6 +326,7 @@ function openJob(j) {
       <div class="card">
         ${multi ? `<h3>${esc(c.brand || c.name)}</h3>` : ''}
         <p class="muted" style="margin-top:${multi ? 4 : 0}px">${esc(timeRange(c.time_from, c.time_to))}${(c.venue || c.location) ? ` · ${esc(c.venue || c.location)}` : ''}</p>
+        ${c.parking_url || c.parking_note ? `<div class="parking"><b>🅿️ Parking</b>${c.parking_note ? `<p class="brief" style="margin:4px 0 0">${esc(c.parking_note)}</p>` : ''}${c.parking_url ? `<button class="btn small" data-park="${ci}" style="margin-top:10px">Navigate to parking</button>` : ''}</div>` : ''}
         ${c.route_url ? `<button class="btn quiet small" data-route="${ci}" style="margin-top:10px">Start route</button><p class="muted small center" style="margin:6px 0 0">Opens Google Maps</p>` : '<p class="muted small">No route for today yet.</p>'}
         ${c.brief ? `<h2 style="margin-top:16px">Instructions</h2><p class="brief">${esc(c.brief)}</p>` : ''}
         ${c.artwork.length ? `<h2 style="margin-top:16px">Artwork for the screen</h2>
@@ -337,6 +339,7 @@ function openJob(j) {
     <button class="probbtn" id="reportFromJob"><span>⚠️</span>Report a problem</button>
     <div class="card" id="photoCard"><h2>Your photos</h2><p class="muted" id="photoList">${j.photos.count ? 'Loading…' : 'No photos yet. When the screen is running, get the whole screen in with some of the activity around it.'}</p></div>`;
   $('jobBody').querySelectorAll('[data-route]').forEach((b) => b.onclick = () => openLink(job.campaigns[+b.dataset.route].route_url));
+  $('jobBody').querySelectorAll('[data-park]').forEach((b) => b.onclick = () => openLink(job.campaigns[+b.dataset.park].parking_url));
   $('jobBody').querySelectorAll('[data-save]').forEach((b) => b.onclick = () => saveArtwork(b, ...b.dataset.save.split(':').map(Number)));
   $('reportFromJob').onclick = () => openProblem(job);
   show('job');
