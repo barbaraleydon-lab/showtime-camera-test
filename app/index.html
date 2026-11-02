@@ -150,7 +150,7 @@
   <div id="jobs"></div>
   <button class="probbtn" id="reportFromDay"><span>⚠️</span>Report a problem</button>
   <button class="btn quiet small availbtn" id="availFromDay">📅 My availability</button>
-  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 2 Nov · 1</p>
+  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 2 Nov · 2</p>
 </div></section>
 
 <section id="job" class="screen"><div class="pad bottomPad" id="jobBody"></div>
@@ -644,7 +644,7 @@ async function shoot() {
   const blob = await new Promise((r) => bestCanvas.toBlob(r, 'image/jpeg', 0.85));
   sh.innerHTML = core; closeCamera();
   pending = Object.assign(pending || {}, { blob, width: w, height: h, q: best.q, banding: best.b, captured_at: capturedAt, capture_source: 'mini_app_camera' });
-  pending.screen_mode = Object.assign(pending.screen_mode || {}, { shot_type: shotType, light_mode: lightMode, frames, orientation: vw > vh ? 'landscape' : 'portrait', guide: GUIDE, lens: lenses[lensIdx] ? lenses[lensIdx].label : null, zoom: Math.round(zoom * 100) / 100, digital_zoom: !hwZoom && zoom > 1 });
+  pending.screen_mode = Object.assign(pending.screen_mode || {}, { shot_type: shotType, light_mode: lightMode, frames, orientation: vw > vh ? 'landscape' : 'portrait', guide: GUIDE, guide_photo: region, lens: lenses[lensIdx] ? lenses[lensIdx].label : null, zoom: Math.round(zoom * 100) / 100, digital_zoom: !hwZoom && zoom > 1 });
   showReview();
 }
 // Fallback: the phone's own camera.
