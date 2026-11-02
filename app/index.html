@@ -150,7 +150,7 @@
   <div id="jobs"></div>
   <button class="probbtn" id="reportFromDay"><span>⚠️</span>Report a problem</button>
   <button class="btn quiet small availbtn" id="availFromDay">📅 My availability</button>
-  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 2 Nov · 2</p>
+  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 2 Nov · 3</p>
 </div></section>
 
 <section id="job" class="screen"><div class="pad bottomPad" id="jobBody"></div>
@@ -616,7 +616,29 @@ async function setZoom(z) {
   cam.addEventListener('touchmove', (e) => { if (e.touches.length === 2 && d0 && track) { e.preventDefault(); const z = z0 * dist(e.touches) / d0; if (hwZoom) { zoom = Math.max(1, Math.min(hwZoom.max, z)); track.applyConstraints({ advanced: [{ zoom: Math.max(hwZoom.min, zoom) }] }).catch(() => {}); } else { zoom = Math.max(1, Math.min(DIGITAL_MAX, z)); video.style.transform = zoom > 1 ? `scale(${zoom})` : ''; } } }, { passive: false });
   cam.addEventListener('touchend', () => { if (d0) { d0 = 0; renderLenses(); } });
 })();
-const full = document.createElement('canvas'), small = document.createElement('canvas'), bestCanvas = document.createElement('canvas');
+const small = document.createElement('canvas'), bestCanvas = document.createElement('canvas'), bandCanvas = document.createElement('canvas');
+// Smart capture. LED lines move from frame to frame, so in about one second of live picture some frames
+// are cleaner than others, even when the phone's shutter is fast (iPhones in Telegram can't set it).
+// We look at the live picture for SMART_MS, score every new frame, and keep only the cleanest one.
+// BAND_BAD is provisional: measured on one banded van photo (about 0.08-0.10) against clean sky (about 0.01).
+// Every shot stores its numbers in screen_mode.smart so it can be tuned on real van photos.
+const SMART_MS = 1000, SMART_MIN = 3, SMART_MAX = 24, BAND_BAD = 0.05, BLUR_WEIGHT = 0.08;
+function nextFrame() {
+  return new Promise((resolve) => {
+    if (!video.requestVideoFrameCallback) return setTimeout(resolve, 40);
+    let done = false; const fin = () => { if (!done) { done = true; clearTimeout(t); resolve(); } };
+    const t = setTimeout(fin, 120); // never wait long for a frame that isn't coming
+    video.requestVideoFrameCallback(fin);
+  });
+}
+// Banding of one live frame: a tall, narrow strip of the screen box, keeping the vertical detail the lines need.
+function bandOf(region, sx, sy, w, h) {
+  const rw = 48, rh = Math.max(16, Math.min(240, Math.round(region.h * h)));
+  bandCanvas.width = rw; bandCanvas.height = rh;
+  const c = bandCanvas.getContext('2d', { willReadFrequently: true });
+  c.drawImage(video, sx + region.x * w, sy + region.y * h, Math.max(1, region.w * w), Math.max(1, region.h * h), 0, 0, rw, rh);
+  return banding(toGray(c.getImageData(0, 0, rw, rh).data, rw, rh), { x: 0, y: 0, w: 1, h: 1 });
+}
 async function shoot() {
   $('shutter').disabled = true; $('hint').textContent = 'Hold still…';
   const sh = $('shutter'), core = sh.innerHTML; sh.innerHTML = '<div class="wspin"></div>';
@@ -625,26 +647,28 @@ async function shoot() {
   const vw = video.clientWidth, vh = video.clientHeight, fw = video.videoWidth, fh = video.videoHeight;
   // Digital zoom (phones without hardware zoom) = the centre crop the driver saw in the preview.
   const dz = hwZoom ? 1 : zoom, w = Math.round(fw / dz), h = Math.round(fh / dz), sx = Math.round((fw - w) / 2), sy = Math.round((fh - h) / 2);
-  // Three quick frames; keep the best so far in its own canvas (only two full frames in memory).
-  // Best = sharpest within 10%, then least banding.
   const region = guideRegion(GUIDE, vw, vh, w, h);
   bestCanvas.width = w; bestCanvas.height = h;
-  let best = null;
-  const frames = lightMode === 'night' ? 5 : 3, gap = lightMode === 'night' ? 150 : 120;
-  for (let i = 0; i < frames; i++) {
-    full.width = w; full.height = h; full.getContext('2d').drawImage(video, sx, sy, w, h, 0, 0, w, h);
-    const sw = 320, shh = Math.round(h * sw / w); small.width = sw; small.height = shh;
-    const c = small.getContext('2d'); c.drawImage(full, 0, 0, sw, shh);
-    const g = toGray(c.getImageData(0, 0, sw, shh).data, sw, shh);
-    const f = { q: assess(g), b: banding(g, region) };
-    const better = !best || f.q.sharpness > best.q.sharpness * 1.1 || (f.q.sharpness >= best.q.sharpness * 0.9 && f.b < best.b);
-    if (better) { best = f; bestCanvas.getContext('2d').drawImage(full, 0, 0); }
-    if (i < frames - 1) await new Promise((r) => setTimeout(r, gap));
+  const sw = 320, shh = Math.round(h * sw / w); small.width = sw; small.height = shh;
+  const sc = small.getContext('2d', { willReadFrequently: true });
+  let best = null, frames = 0; const bands = [], t0 = performance.now();
+  while (frames < SMART_MAX && (frames < SMART_MIN || performance.now() - t0 < SMART_MS)) {
+    await nextFrame();
+    // Everything below runs without waiting, so every read sees the same frame.
+    sc.drawImage(video, sx, sy, w, h, 0, 0, sw, shh);
+    const q = assess(toGray(sc.getImageData(0, 0, sw, shh).data, sw, shh));
+    const b = bandOf(region, sx, sy, w, h);
+    bands.push(b); frames++;
+    // Least banding wins; a blurred frame pays a small penalty so a shaky frame doesn't beat a steady one.
+    const score = b + BLUR_WEIGHT * (1 - q.sharpness);
+    if (!best || score < best.score) { best = { q, b, score, i: frames }; bestCanvas.getContext('2d').drawImage(video, sx, sy, w, h, 0, 0, w, h); }
   }
   const blob = await new Promise((r) => bestCanvas.toBlob(r, 'image/jpeg', 0.85));
   sh.innerHTML = core; closeCamera();
+  const sorted = bands.slice().sort((a, b) => a - b), r4 = (n) => Math.round(n * 1e4) / 1e4;
   pending = Object.assign(pending || {}, { blob, width: w, height: h, q: best.q, banding: best.b, captured_at: capturedAt, capture_source: 'mini_app_camera' });
-  pending.screen_mode = Object.assign(pending.screen_mode || {}, { shot_type: shotType, light_mode: lightMode, frames, orientation: vw > vh ? 'landscape' : 'portrait', guide: GUIDE, guide_photo: region, lens: lenses[lensIdx] ? lenses[lensIdx].label : null, zoom: Math.round(zoom * 100) / 100, digital_zoom: !hwZoom && zoom > 1 });
+  pending.screen_mode = Object.assign(pending.screen_mode || {}, { shot_type: shotType, light_mode: lightMode, frames, orientation: vw > vh ? 'landscape' : 'portrait', guide: GUIDE, guide_photo: region, lens: lenses[lensIdx] ? lenses[lensIdx].label : null, zoom: Math.round(zoom * 100) / 100, digital_zoom: !hwZoom && zoom > 1,
+    smart: { ms: Math.round(performance.now() - t0), frames, picked: best.i, band_best: r4(sorted[0]), band_median: r4(sorted[sorted.length >> 1]), band_worst: r4(sorted[sorted.length - 1]) } });
   showReview();
 }
 // Fallback: the phone's own camera.
@@ -663,7 +687,10 @@ function showReview() {
   $('stars').textContent = '★'.repeat(Math.floor(q.stars)) + (q.stars % 1 ? '½' : '') + '☆'.repeat(5 - Math.ceil(q.stars));
   $('verdict').textContent = q.verdict;
   $('reviewSub').textContent = 'Photo quality (approx.)';
-  $('tips').innerHTML = q.tips.length ? q.tips.map((t) => `<p>${esc(t)}</p>`).join('') : '<p>Looks fine on sharpness and light.</p>';
+  // Even the cleanest of the ~1 s of frames still shows lines: say so, so the driver can retake from a better spot.
+  const tips = q.tips.slice();
+  if (pending.capture_source === 'mini_app_camera' && pending.banding > BAND_BAD) tips.unshift('Lines are showing on the screen. Step back a little, keep the sun out of the shot, and retake.');
+  $('tips').innerHTML = tips.length ? tips.slice(0, 3).map((t) => `<p>${esc(t)}</p>`).join('') : '<p>Looks fine on sharpness and light.</p>';
   show('review', false);
 }
 
