@@ -150,7 +150,7 @@
   <div id="jobs"></div>
   <button class="probbtn" id="reportFromDay"><span>⚠️</span>Report a problem</button>
   <button class="btn quiet small availbtn" id="availFromDay">📅 My availability</button>
-  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 2 Nov · 3</p>
+  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 7 Nov · 1</p>
 </div></section>
 
 <section id="job" class="screen"><div class="pad bottomPad" id="jobBody"></div>
@@ -252,8 +252,13 @@ function message(title, body, retry) {
 }
 function haptic(kind) { try { if (!tg || !tg.HapticFeedback) return; if (kind === 'select') tg.HapticFeedback.selectionChanged(); else tg.HapticFeedback.notificationOccurred(kind); } catch (e) {} }
 
-async function api(action, body = {}) {
-  const r = await fetch(`${API}?action=${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: initData, ...body }) });
+async function api(action, body = {}, timeoutMs = 30000) {
+  // A request on a weak signal must never hang for ever (it used to freeze the upload queue until the app was reopened).
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), timeoutMs);
+  let r;
+  try { r = await fetch(`${API}?action=${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: initData, ...body }), signal: ctl.signal }); }
+  catch (e) { const err = new Error(ctl.signal.aborted ? 'timed out' : 'network error'); err.network = true; throw err; }
+  finally { clearTimeout(t); }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(j.message || `Error ${r.status}`); e.code = j.error; e.status = r.status; throw e; }
   return j;
@@ -352,8 +357,9 @@ async function loadPhotos() {
   try {
     const r = await api('photos', { vehicle_id: job.vehicle.id, campaign_day: job.date });
     const pending = (await queueAll()).filter((q) => q.vehicle_id === job.vehicle.id && q.campaign_day === job.date && q.state !== 'done').length;
-    $('photoList').innerHTML = (pending ? `<p><b>${pending} waiting to upload</b> — <span id="uploadLine">${uploadNow ? `Uploading… ${uploadNow.pct}%` : 'waiting for signal'}</span>. Keep this page open.</p>` : '') +
+    $('photoList').innerHTML = (pending ? `<p><b>${pending} waiting to upload</b> — <span id="uploadLine">${uploadNow ? `Uploading… ${uploadNow.pct}%` : 'waiting for signal'}</span>. <a href="#" id="sendNow">Send now</a></p>` : '') +
       (r.photos.length ? r.photos.map((p) => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)"><span>${new Date(p.captured_at).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' })}${p.stars ? ` · approx. ${p.stars}★` : ''}</span><span class="muted small">${esc(STATUS[p.status] || p.status)}</span></div>`).join('') : '');
+    const sn = $('sendNow'); if (sn) sn.onclick = (ev) => { ev.preventDefault(); retryWait = 15000; processQueue(); };
   } catch (e) { $('photoList').textContent = 'Could not load your photos.'; }
 }
 
@@ -710,40 +716,82 @@ function putWithProgress(url, blob, mime, onProgress) {
     const x = new XMLHttpRequest(); x.open('PUT', url); x.timeout = 120000;
     x.setRequestHeader('Content-Type', mime); x.setRequestHeader('x-upsert', 'false');
     x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round(100 * e.loaded / e.total)); };
-    x.onload = () => (x.status < 300 || x.status === 409) ? res() : rej(new Error(`upload ${x.status}`));
+    x.onload = () => { if (x.status < 300 || x.status === 409) return res(); const e = new Error(`upload ${x.status}`); e.putStatus = x.status; rej(e); };
     x.onerror = () => rej(new Error('upload network error')); x.ontimeout = () => rej(new Error('upload timed out'));
     x.send(blob);
   });
 }
 function paintProgress() { const el = $('uploadLine'); if (el && uploadNow) el.textContent = `Uploading… ${uploadNow.pct}%`; }
+// The queue keeps going on its own: it re-reads the list after every pass (photos kept while
+// it was busy are picked up), a stuck pass is abandoned after 3 minutes, and while anything is
+// waiting it tries again every 15-60 seconds. Drivers never need to reopen the app.
+let runId = 0, runStarted = 0, again = false, retryTimer = null, retryWait = 15000;
 async function processQueue() {
-  if (processing) return; processing = true;
+  if (processing && Date.now() - runStarted < 180000) { again = true; return; }
+  const me = ++runId; processing = true; runStarted = Date.now(); again = false;
+  let left = 0;
   try {
-    for (const item of await queueAll()) {
-      try {
-        if (!item.evidence_id) {
-          const r = await api('upload-intent', item.meta);
-          item.evidence_id = r.evidence_id; item.upload_url = r.upload_url; await queuePut(item);
+    for (let pass = 0; pass < 20; pass++) {
+      const items = await queueAll();
+      left = items.length;
+      if (!items.length) break;
+      let progressed = false;
+      for (const item of items) {
+        if (me !== runId) return;
+        try {
+          await sendOne(item);
+          progressed = true; left--;
+          toast('Photo uploaded. Waiting for the office.'); haptic('success');
+        } catch (e) {
+          uploadNow = null;
+          if (e.code === 'not_assigned' || e.status === 400) { await queueDel(item.id); left--; toast('A photo could not be filed to this job and was removed.'); }
+          // anything else stays queued and is tried again shortly
         }
-        if (!item.uploaded) {
-          await putWithProgress(item.upload_url, item.blob, item.meta.mime_type, (pct) => { uploadNow = { id: item.id, pct }; paintProgress(); });
-          item.uploaded = true; await queuePut(item);
-        }
-        uploadNow = null;
-        await api('upload-complete', { evidence_id: item.evidence_id, sha256: item.sha256 });
-        await queueDel(item.id);
-        toast('Photo uploaded. Waiting for the office.'); haptic('success');
-      } catch (e) {
-        uploadNow = null;
-        if (e.code === 'not_assigned' || e.status === 400) { await queueDel(item.id); toast('A photo could not be filed to this job and was removed.'); }
-        // otherwise leave it queued; retried in a minute, on the next photo, or on the next open
-        else retrySoon();
+        runStarted = Date.now();
       }
+      if (!again && !progressed) break;
+      again = false;
     }
-  } finally { processing = false; if (current === 'job' && job) loadPhotos(); }
+  } finally {
+    if (me === runId) {
+      processing = false; uploadNow = null;
+      if (current === 'job' && job) loadPhotos();
+      if (left > 0) retrySoon(); else { retryWait = 15000; clearTimeout(retryTimer); retryTimer = null; }
+    }
+  }
 }
-let retryTimer = null;
-function retrySoon() { clearTimeout(retryTimer); retryTimer = setTimeout(() => { retryTimer = null; if (navigator.onLine !== false) processQueue(); }, 60000); }
+async function sendOne(item) {
+  if (!item.evidence_id) {
+    const r = await api('upload-intent', item.meta);
+    item.evidence_id = r.evidence_id; item.upload_url = r.upload_url; item.url_at = Date.now(); await queuePut(item);
+  }
+  if (!item.uploaded) {
+    // Upload links last 2 hours: a photo that waited longer gets a fresh link for the same record.
+    if (!item.upload_url || !item.url_at || Date.now() - item.url_at > 100 * 60000) await renewUrl(item);
+    if (!item.uploaded) {
+      try { await putWithProgress(item.upload_url, item.blob, item.meta.mime_type, (pct) => { uploadNow = { id: item.id, pct }; paintProgress(); }); }
+      catch (e) {
+        if (!(e.putStatus >= 400 && e.putStatus < 500)) throw e;
+        await renewUrl(item);
+        if (!item.uploaded) await putWithProgress(item.upload_url, item.blob, item.meta.mime_type, (pct) => { uploadNow = { id: item.id, pct }; paintProgress(); });
+      }
+      item.uploaded = true; await queuePut(item);
+    }
+  }
+  uploadNow = null;
+  await api('upload-complete', { evidence_id: item.evidence_id, sha256: item.sha256 });
+  await queueDel(item.id);
+}
+async function renewUrl(item) {
+  const r = await api('upload-renew', { evidence_id: item.evidence_id });
+  if (r.already) { item.uploaded = true; await queuePut(item); return; }
+  item.upload_url = r.upload_url; item.url_at = Date.now(); await queuePut(item);
+}
+function retrySoon() {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => { retryTimer = null; processQueue(); }, retryWait);
+  retryWait = Math.min(60000, Math.round(retryWait * 1.5));
+}
 async function keep(another = false) {
   $('keep').disabled = true; $('keepMore').disabled = true;
   const loc = await (locPromise || Promise.resolve({ gps_status: 'unknown' }));
@@ -921,7 +969,10 @@ $('keepMore').onclick = () => keep(true);
 $('retake').onclick = () => { pending = null; openCamera(); };
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseCamera(); else processQueue(); });
 window.addEventListener('pagehide', releaseCamera);
-window.addEventListener('online', () => processQueue());
+window.addEventListener('online', () => { retryWait = 15000; processQueue(); });
+window.addEventListener('focus', () => processQueue());
+window.addEventListener('pageshow', () => processQueue());
+try { tg.onEvent && tg.onEvent('activated', () => processQueue()); } catch (e) {}
 load();
 })();
 </script>
