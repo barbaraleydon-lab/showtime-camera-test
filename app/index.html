@@ -150,7 +150,7 @@
   <div id="jobs"></div>
   <button class="probbtn" id="reportFromDay"><span>⚠️</span>Report a problem</button>
   <button class="btn quiet small availbtn" id="availFromDay">📅 My availability</button>
-  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 7 Nov · 1</p>
+  <p class="muted small center" style="margin-top:24px;opacity:.6">Version 7 Nov · 2</p>
 </div></section>
 
 <section id="job" class="screen"><div class="pad bottomPad" id="jobBody"></div>
@@ -357,9 +357,14 @@ async function loadPhotos() {
   try {
     const r = await api('photos', { vehicle_id: job.vehicle.id, campaign_day: job.date });
     const pending = (await queueAll()).filter((q) => q.vehicle_id === job.vehicle.id && q.campaign_day === job.date && q.state !== 'done').length;
-    $('photoList').innerHTML = (pending ? `<p><b>${pending} waiting to upload</b> — <span id="uploadLine">${uploadNow ? `Uploading… ${uploadNow.pct}%` : 'waiting for signal'}</span>. <a href="#" id="sendNow">Send now</a></p>` : '') +
+    $('photoList').innerHTML = (pending ? `<p><b>${pending} waiting to upload</b> — <span id="uploadLine">${uploadNow ? `Uploading… ${uploadNow.pct}%` : processing ? 'sending…' : esc(lastProblem || 'waiting for signal')}</span>. <a href="#" id="sendNow">Send now</a></p>` : '') +
       (r.photos.length ? r.photos.map((p) => `<div class="spread" style="padding:6px 0;border-top:1px solid var(--line)"><span>${new Date(p.captured_at).toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' })}${p.stars ? ` · approx. ${p.stars}★` : ''}</span><span class="muted small">${esc(STATUS[p.status] || p.status)}</span></div>`).join('') : '');
-    const sn = $('sendNow'); if (sn) sn.onclick = (ev) => { ev.preventDefault(); retryWait = 15000; processQueue(); };
+    const sn = $('sendNow'); if (sn) sn.onclick = (ev) => {
+      ev.preventDefault(); retryWait = 15000;
+      const line = $('uploadLine'); if (line) line.textContent = 'sending…';
+      if (processing) runStarted = 0; // a pass that looks stuck is replaced at once
+      processQueue();
+    };
   } catch (e) { $('photoList').textContent = 'Could not load your photos.'; }
 }
 
@@ -725,7 +730,7 @@ function paintProgress() { const el = $('uploadLine'); if (el && uploadNow) el.t
 // The queue keeps going on its own: it re-reads the list after every pass (photos kept while
 // it was busy are picked up), a stuck pass is abandoned after 3 minutes, and while anything is
 // waiting it tries again every 15-60 seconds. Drivers never need to reopen the app.
-let runId = 0, runStarted = 0, again = false, retryTimer = null, retryWait = 15000;
+let runId = 0, runStarted = 0, again = false, retryTimer = null, retryWait = 15000, lastProblem = '';
 async function processQueue() {
   if (processing && Date.now() - runStarted < 180000) { again = true; return; }
   const me = ++runId; processing = true; runStarted = Date.now(); again = false;
@@ -740,12 +745,14 @@ async function processQueue() {
         if (me !== runId) return;
         try {
           await sendOne(item);
-          progressed = true; left--;
+          progressed = true; left--; lastProblem = '';
           toast('Photo uploaded. Waiting for the office.'); haptic('success');
         } catch (e) {
           uploadNow = null;
           if (e.code === 'not_assigned' || e.status === 400) { await queueDel(item.id); left--; toast('A photo could not be filed to this job and was removed.'); }
+          else if (e.unreadable) { await queueDel(item.id); left--; toast('This phone lost one photo before it could be sent. Please take it again.'); }
           // anything else stays queued and is tried again shortly
+          else lastProblem = e.network || /network|timed out/i.test(e.message) ? 'no signal, trying again' : `trying again (${e.message})`;
         }
         runStarted = Date.now();
       }
@@ -769,11 +776,12 @@ async function sendOne(item) {
     // Upload links last 2 hours: a photo that waited longer gets a fresh link for the same record.
     if (!item.upload_url || !item.url_at || Date.now() - item.url_at > 100 * 60000) await renewUrl(item);
     if (!item.uploaded) {
-      try { await putWithProgress(item.upload_url, item.blob, item.meta.mime_type, (pct) => { uploadNow = { id: item.id, pct }; paintProgress(); }); }
+      const body = await itemBody(item);
+      try { await putWithProgress(item.upload_url, body, item.meta.mime_type, (pct) => { uploadNow = { id: item.id, pct }; paintProgress(); }); }
       catch (e) {
         if (!(e.putStatus >= 400 && e.putStatus < 500)) throw e;
         await renewUrl(item);
-        if (!item.uploaded) await putWithProgress(item.upload_url, item.blob, item.meta.mime_type, (pct) => { uploadNow = { id: item.id, pct }; paintProgress(); });
+        if (!item.uploaded) await putWithProgress(item.upload_url, body, item.meta.mime_type, (pct) => { uploadNow = { id: item.id, pct }; paintProgress(); });
       }
       item.uploaded = true; await queuePut(item);
     }
@@ -781,6 +789,16 @@ async function sendOne(item) {
   uploadNow = null;
   await api('upload-complete', { evidence_id: item.evidence_id, sha256: item.sha256 });
   await queueDel(item.id);
+}
+// The photo's bytes. Older photos were kept as a Blob, which an iPhone can lose once the app
+// is closed: read it now and keep the bytes instead, or report it as unreadable.
+async function itemBody(item) {
+  if (item.bytes) return new Blob([item.bytes], { type: item.mime || item.meta.mime_type || 'image/jpeg' });
+  let buf = null;
+  try { buf = item.blob ? await item.blob.arrayBuffer() : null; } catch (e) { buf = null; }
+  if (!buf || !buf.byteLength) { const e = new Error('photo unreadable'); e.unreadable = true; throw e; }
+  item.bytes = buf; item.mime = item.blob.type || item.meta.mime_type || 'image/jpeg'; delete item.blob; await queuePut(item);
+  return new Blob([buf], { type: item.mime });
 }
 async function renewUrl(item) {
   const r = await api('upload-renew', { evidence_id: item.evidence_id });
@@ -799,7 +817,7 @@ async function keep(another = false) {
   const item = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     vehicle_id: job.vehicle.id, campaign_day: job.date,
-    blob: pending.blob, sha256: await sha256(pending.blob),
+    bytes: await pending.blob.arrayBuffer(), mime: pending.blob.type || 'image/jpeg', sha256: await sha256(pending.blob),
     meta: {
       vehicle_id: job.vehicle.id, campaign_day: job.date,
       hint_campaign_id: chosen ? chosen.campaign : null, hint_artwork_piece_id: chosen ? chosen.piece || null : null,
